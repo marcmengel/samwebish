@@ -1,11 +1,15 @@
 #!/usr/bin/env python
-from metacat.webapi import MetaCatClient
+import base64
+import cherrypy
+import json
+import os
+import re
+import time
+import traceback
 from data_dispatcher.api import DataDispatcherClient
+from metacat.webapi import MetaCatClient
 from rucio.client import Client as RClient
 from rucio.client.replicaclient import ReplicaClient
-import time
-import jwt
-import re
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for authentication, client connection caching
@@ -19,6 +23,8 @@ class ClientCache:
         self.ddcexp = {}
         self.rccache = {}
         self.rcexp = {}
+        self.rrpccache = {}
+        self.rrpcexp = {}
         # for get_username, below
         self.subj_user_re = re.compile("(.*)@fnal.gov")
         self.scope_user_re = re.compile("storage.write:[^ ]*/users/([^ ]*)")
@@ -29,7 +35,12 @@ class ClientCache:
         authheader = cherrypy.request.headers.get("Authorization","")
         if not authheader:
             raise cherrypy.HTTPError(401, 'SciToken athentication required')
-        return autheader[token_offset:]
+        return authheader[self.token_offset:]
+
+    def cheap_decode_token(self, scitok):
+        """ extract json data from jwt token without validating, etc. """
+        tp = scitok.split(".")
+        return json.loads(base64.b64decode(tp[1]+'=='))
 
     def get_username(self, scitok):
         """ get username from scitoken """
@@ -41,7 +52,9 @@ class ClientCache:
         # if our subject is username@fnal.gov, take that
         # otherwise look for a username in the scope 
         # i.e. "storage.write:.../users/username" 
-        decoded = jwt.decode(scitok, algorithms=["RS256","ES256"])
+        
+        cherrypy.log(f"get_username: {scitok=}")
+        decoded = self.cheap_decode_token(scitok)
         m = self.subj_user_re.match(decoded["sub"])
         if m:
              return m.group(1)
@@ -54,7 +67,7 @@ class ClientCache:
         """ get DataDispatcherClient for this client """
         scitok = self.get_scitoken()
         if not scitok in self.ddccache or self.ddcexp[scitok] < time.time():
-            username = self.getusername(scitok)
+            username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
             self.ddccache[scitok] = DataDispatcherClient(token_file="/dev/null")
@@ -69,7 +82,7 @@ class ClientCache:
         """ get MetaCatClient for this client """
         scitok = self.get_scitoken()
         if not scitok in self.mcccache or self.mccexp[scitok] < time.time():
-            username = self.getusername(scitok)
+            username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
             self.mcccache[scitok] = MetaCatClient(token_file="/dev/null")
@@ -85,7 +98,7 @@ class ClientCache:
         """ get rucio Client for this client """
         scitok = self.get_scitoken()
         if not scitok in self.rccache or self.mccexp[scitok] < time.time():
-            username = self.getusername(scitok)
+            username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
             try:
@@ -94,12 +107,38 @@ class ClientCache:
                 os.environ["BEARER_TOKEN"]=scitok
                 self.rccache[scitok] = RClient(auth_type="oidc", creds={"user":username})
                 del os.environ["BEARER_TOKEN"]
+                cherrypy.log(f"getr_client: {self.rccache[scitok]=}")
             except:
-                del os.environ["BEARER_TOKEN"]
+                if "BEARER_TOKEN" in os.environ:
+                    del os.environ["BEARER_TOKEN"]
+                cherrypy.log(f"Exception: {traceback.format_exc()}")
                 raise cherrypy.HTTPError(401, 'SciToken athentication failed')
             # cache for 5 minutes
             self.rcexp[scitok] = time.time() + 300
         return self.rccache[scitok]
+
+    def getrrp_client(self):
+        """ get rucio Client for this client """
+        scitok = self.get_scitoken()
+        if not scitok in self.rrpccache or self.rrcpexp[scitok] < time.time():
+            username = self.get_username(scitok)
+            # set token_file on client to /dev/null so we don't have to
+            # track/clean up token_library files.
+            try:
+                # can't pass token into rucio client, so briefly set
+                # BEARER_TOKEN (?)
+                os.environ["BEARER_TOKEN"]=scitok
+                self.rrpccache[scitok] = ReplicaClient(auth_type="oidc", creds={"user":username})
+                del os.environ["BEARER_TOKEN"]
+                cherrypy.log(f"getrrp_client: {self.rrpccache[scitok]=}")
+            except:
+                if "BEARER_TOKEN" in os.environ:
+                    del os.environ["BEARER_TOKEN"]
+                cherrypy.log(f"Exception: {traceback.format_exc()}")
+                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+            # cache for 5 minutes
+            self.rrpcexp[scitok] = time.time() + 300
+        return self.rrpccache[scitok]
 
     def clean_expired(self):
         now = time.time()
@@ -115,7 +154,7 @@ class ClientCache:
 client_cache = ClientCache()
 
 class ClientCacheMixin():
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -124,7 +163,7 @@ class ClientCacheMixin():
 class Definitions(ClientCacheMixin):
     """ dispatcher and methods for /api/definitions paths """
 
-    def __cp_dispatch(self, vpath):
+    def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb definitions api """
         if len(vpath) == 1:
             # simple method like create
@@ -176,11 +215,11 @@ class Definitions(ClientCacheMixin):
         pass
 
     @cherrypy.expose
-    def get(self, defname)
+    def get(self, defname):
         pass   
 
     @cherrypy.expose
-    def list(self, defname)
+    def list(self, defname):
         pass   
 
     @cherrypy.expose
@@ -195,8 +234,9 @@ class Definitions(ClientCacheMixin):
 class Files(ClientCacheMixin):
     """ dispatcher and methods for /api/files paths """
 
-    def __cp_dispatch(self, vpath):
+    def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
+        cherrypy.log(f"Files:_cp_dispatch: {vpath=}")
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
         if len(vpath) == 1:
@@ -231,15 +271,20 @@ class Files(ClientCacheMixin):
     def summary(self, **kwargs):
         pass
 
-    def samloc(self, rpdict):
-        pathoffset = rpdict['path'].find('/',9)
-        return f"{rpdict['rse']}:{rpdict[path][pathoffset:]}"
 
     @cherrypy.expose
     def get_name_locations(self, name="", **kwargs):
-        rpclient = ReplicaClient(self.getr_client())
-        res = rpclient.list_replicas( [("sam",name)] )
-        return "\n".join([self.samloc(x) for x in res])
+        cherrypy.log(f"get_name_locations {name=}")
+        rpclient = self.client_cache.getrrp_client()
+        data = list(rpclient.list_replicas( [{"scope":"hypot", "name":name}] ))
+        cherrypy.log(f"get_name_locations: {data=}")
+        rses = data[0]["rses"]
+        res = []
+        for rse in rses:
+            for pfn in rses[rse]:
+                 ploc = pfn.find("/",9)
+                 res.append(f"{rse}:{pfn[ploc:]}")
+        return "\n".join(res)
 
     @cherrypy.expose
     def put_name_locations(self, **kwargs):
@@ -280,22 +325,22 @@ class Files(ClientCacheMixin):
 class Users(ClientCacheMixin):
     """ dispatcher and methods for /api/users paths """
 
-    def __cp_dispatch(self, vpath):
+    def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
         if len(vpath) == 2:
             cherrypy.request.params['findby'] = vpath.pop(0)
             cherrypy.request.params['nameorid'] = vpath.pop(0)
-            cherrypy.request.params['method'] = cherrypy.request.method.lower())
+            cherrypy.request.params['method'] = cherrypy.request.method.lower()
             vpath.insert(0,f"{method}_by_{findby}")
 
     @cherrypy.expose
-    def get(self, username=None, status=None)
+    def get(self, username=None, status=None):
         pass
 
     @cherrypy.expose
-    def post(self, jsondata)
+    def post(self, jsondata):
         pass
 
     @cherrypy.expose
@@ -317,7 +362,7 @@ class Users(ClientCacheMixin):
 class Values(ClientCacheMixin):
     """ dispatcher and methods for /api/values paths """
 
-    def __cp_dispatch(self, vpath):
+    def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
         if len(vpath) == 1:
             cherrypy.request.params['value_type'] = vpath.pop(0)
@@ -342,7 +387,7 @@ class Values(ClientCacheMixin):
 class Projects(ClientCacheMixin):
     """ dispatcher and methods for /api/project paths """
 
-    def __cp_dispatch(self, vpath):
+    def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
@@ -412,8 +457,9 @@ class Api(ClientCacheMixin):
             "projects": Projects(),
         }
 
-    def __cp_dispatch(self, vpath):
+    def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb api """
+        cherrypy.log(f"Api:_cp_dispatch: {vpath=}")
         if len(vpath) == 0:
             vpath.insert(0, 'index')
             return self
@@ -428,7 +474,9 @@ class Api(ClientCacheMixin):
     
     @cherrypy.expose
     def index(self, **kwargs):
-        pass
+        cherrypy.log("test message")
+        return '{"app":"samwebish", "version":0.0}'
+
     @cherrypy.expose
     def createDefinition(self, **kwargs):
         pass
@@ -468,3 +516,6 @@ def main():
 
     cherrypy.engine.start()
     cherrypy.engine.block()
+
+if __name__ == '__main__':
+    main()
