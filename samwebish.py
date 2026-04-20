@@ -1,4 +1,105 @@
-class Definitions:
+
+from metacat.webapi import MetaCatClient
+from data_dispatcher.api import DataDispatcherClient
+import time
+import jwt
+import re
+
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# classes for authentication
+
+class ClientCache:
+
+    def __init__(self):
+        self.mcccache = {}
+        self.mccexp = {}
+        self.ddccache = {}
+        self.ddcexp = {}
+        # for get_username, below
+        self.subj_user_re = re.compile("(.*)@fnal.gov")
+        self.scope_user_re = re.compile("storage.write:[^ ]*/users/([^ ]*)")
+        self.token_offset = len("Bearer ")
+
+    def get_scitoken(self):
+        """ extract scitoken from Authorization: header """
+        authheader = cherrypy.request.headers.get("Authorization","")
+        if not authheader:
+            raise cherrypy.HTTPError(401, 'SciToken athentication required')
+        return autheader[token_offset:]
+
+    def get_username(self, scitok):
+        """ get username from scitoken """
+        # Scitoken purists will tell us *not* to do this, nor to map
+        # tokens to users at all, but SAMweb and MetaCat do, via db tables
+        # so we can either setup one of these tables, or cheat.
+        # Currently we cheat:
+        # our subjects are often not usernames, (except production accounts)
+        # if our subject is username@fnal.gov, take that
+        # otherwise look for a username in the scope 
+        # i.e. "storage.write:.../users/username" 
+        decoded = jwt.decode(scitok, algorithms=["RS256","ES256"])
+        m = self.subj_user_re.match(decoded["sub"])
+        if m:
+             return m.group(1)
+        m = self.scope_user_re.search(decoded["scope"])
+        if m:
+             return m.group(1)
+        return None
+       
+    def getdd_client(self):
+        """ get DataDispatcherClient for this client """
+        scitok = self.get_scitoken()
+        if not scitok in self.ddccache or self.ddcexp[scitok] < time.time():
+            username = self.getusername(scitok)
+            # set token_file on client to /dev/null so we don't have to
+            # track/clean up token_library files.
+            self.ddccache[scitok] = DataDispatcherClient(token_file="/dev/null")
+            try:
+                self.ddccache[scitok].login_token(username, scitok)
+            except:
+                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+            self.ddcexp[scitok] = time.time() + 300
+        return self.ddccache[scitok]
+
+    def getmc_client(self):
+        """ get MetaCatClient for this client """
+        scitok = self.get_scitoken()
+        if not scitok in self.mcccache or self.mccexp[scitok] < time.time():
+            username = self.getusername(scitok)
+            # set token_file on client to /dev/null so we don't have to
+            # track/clean up token_library files.
+            self.mcccache[scitok] = MetaCatClient(token_file="/dev/null")
+            try:
+                self.mcccache[scitok].login_token(username, scitok)
+            except:
+                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+            # cache for 5 minutes
+            self.mccexp[scitok] = time.time() + 300
+        return self.mcccache[scitok]
+
+    def clean_expired(self):
+        now = time.time()
+        for tok in self.mccexp:
+            if self.mccexp < now:
+                del self.mccexp[tok]
+                del self.mcccache[tok]
+        for tok in self.ddcexp:
+            if self.ddcexp < now:
+                del self.ddcexp[tok]
+                del self.ddccache[tok]
+
+client_cache = ClientCache()
+
+class ClientCacheMixin():
+    def __init__(self):
+        global client_cache
+        self.client_cache = client_cache
+
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# classes for dispatching/handling web calls via CherryPy
+
+class Definitions(ClientCacheMixin):
+    """ dispatcher and methods for /api/definitions paths """
 
     def __cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb definitions api """
@@ -24,8 +125,25 @@ class Definitions:
             return self
 
     @cherrypy.expose
-    def list(self, defname=None, user=None, group=None, after=None, before=None):
-        pass
+    def list(self, defname="", user="", group="", after="", before=""):
+        client = self.client_cache.getmc_client()
+        if not defname:
+            defname = "*"
+        query = r"queries matching sam:{defname}"
+        sep = "where"
+        if user:
+            query = f"{query} {sep} owner={user}"
+            sep = "and"
+        if after:
+            query = f"{query} {sep} created_timestamp>'{after}'"
+            sep = "and"
+        if before:
+            query = f"{query} {sep} created_timestamp<'{before}'"
+            sep = "and"
+            
+        dlist = client.search_named_queries(query)
+        return "\n".join([ x["name"] for x in dlist ])
+                    
 
     @cherrypy.expose
     def create(self, defname, dims, user):
@@ -52,7 +170,9 @@ class Definitions:
         pass
 
 
-class Files:
+class Files(ClientCacheMixin):
+    """ dispatcher and methods for /api/files paths """
+
     def __cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
         if len(vpath) == 0:
@@ -129,7 +249,9 @@ class Files:
     def put_id_content_status(self, **kwargs):
         pass
 
-class Users:
+class Users(ClientCacheMixin):
+    """ dispatcher and methods for /api/users paths """
+
     def __cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
         if len(vpath) == 0:
@@ -164,7 +286,9 @@ class Users:
     def put_by_id(self, nameorid, jsondata):
         pass
 
-class Values:
+class Values(ClientCacheMixin):
+    """ dispatcher and methods for /api/values paths """
+
     def __cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
         if len(vpath) == 1:
@@ -187,7 +311,9 @@ class Values:
     def post_applications(self, **kwargs):
         pass
 
-class Projects:
+class Projects(ClientCacheMixin):
+    """ dispatcher and methods for /api/project paths """
+
     def __cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
         if len(vpath) == 0:
@@ -246,7 +372,9 @@ class Projects:
         pass
 
 
-class Api:
+class Api(ClientCacheMixin):
+    """ dispatcher and methods for /api/ paths """
+
     def __init__(self):
         self.parts = {
             "definitions": Definitions(),
@@ -257,11 +385,12 @@ class Api:
         }
 
     def __cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb files api """
+        """ handle various REST-ish parsing of samweb api """
         if len(vpath) == 0:
             vpath.insert(0, 'index')
             return self
         if vpath[0] in self.parts:
+            # for things in our parts array, hand off
             return self.parts[vpath.pop(0)]
         if len(vpath) == 3:
             vpath.pop(0)
@@ -269,6 +398,9 @@ class Api:
             return self
         return self 
     
+    @cherrypy.expose
+    def index(self, **kwargs):
+        pass
     @cherrypy.expose
     def createDefinition(self, **kwargs):
         pass
