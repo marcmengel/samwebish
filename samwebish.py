@@ -1,12 +1,14 @@
-
+#!/usr/bin/env python
 from metacat.webapi import MetaCatClient
 from data_dispatcher.api import DataDispatcherClient
+from rucio.client import Client as RClient
+from rucio.client.replicaclient import ReplicaClient
 import time
 import jwt
 import re
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-# classes for authentication
+# classes for authentication, client connection caching
 
 class ClientCache:
 
@@ -15,6 +17,8 @@ class ClientCache:
         self.mccexp = {}
         self.ddccache = {}
         self.ddcexp = {}
+        self.rccache = {}
+        self.rcexp = {}
         # for get_username, below
         self.subj_user_re = re.compile("(.*)@fnal.gov")
         self.scope_user_re = re.compile("storage.write:[^ ]*/users/([^ ]*)")
@@ -77,6 +81,26 @@ class ClientCache:
             self.mccexp[scitok] = time.time() + 300
         return self.mcccache[scitok]
 
+    def getr_client(self):
+        """ get rucio Client for this client """
+        scitok = self.get_scitoken()
+        if not scitok in self.rccache or self.mccexp[scitok] < time.time():
+            username = self.getusername(scitok)
+            # set token_file on client to /dev/null so we don't have to
+            # track/clean up token_library files.
+            try:
+                # can't pass token into rucio client, so briefly set
+                # BEARER_TOKEN (?)
+                os.environ["BEARER_TOKEN"]=scitok
+                self.rccache[scitok] = RClient(auth_type="oidc", creds={"user":username})
+                del os.environ["BEARER_TOKEN"]
+            except:
+                del os.environ["BEARER_TOKEN"]
+                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+            # cache for 5 minutes
+            self.rcexp[scitok] = time.time() + 300
+        return self.rccache[scitok]
+
     def clean_expired(self):
         now = time.time()
         for tok in self.mccexp:
@@ -92,7 +116,6 @@ client_cache = ClientCache()
 
 class ClientCacheMixin():
     def __init__(self):
-        global client_cache
         self.client_cache = client_cache
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -132,7 +155,7 @@ class Definitions(ClientCacheMixin):
         query = r"queries matching sam:{defname}"
         sep = "where"
         if user:
-            query = f"{query} {sep} owner={user}"
+            query = f"{query} {sep} creator={user}"
             sep = "and"
         if after:
             query = f"{query} {sep} created_timestamp>'{after}'"
@@ -144,7 +167,6 @@ class Definitions(ClientCacheMixin):
         dlist = client.search_named_queries(query)
         return "\n".join([ x["name"] for x in dlist ])
                     
-
     @cherrypy.expose
     def create(self, defname, dims, user):
         pass
@@ -209,9 +231,15 @@ class Files(ClientCacheMixin):
     def summary(self, **kwargs):
         pass
 
+    def samloc(self, rpdict):
+        pathoffset = rpdict['path'].find('/',9)
+        return f"{rpdict['rse']}:{rpdict[path][pathoffset:]}"
+
     @cherrypy.expose
-    def get_name_locations(self, **kwargs):
-        pass
+    def get_name_locations(self, name="", **kwargs):
+        rpclient = ReplicaClient(self.getr_client())
+        res = rpclient.list_replicas( [("sam",name)] )
+        return "\n".join([self.samloc(x) for x in res])
 
     @cherrypy.expose
     def put_name_locations(self, **kwargs):
