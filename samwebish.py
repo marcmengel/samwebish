@@ -27,7 +27,7 @@ class ClientCache:
         self.rrpcexp = {}
         # for get_username, below
         self.subj_user_re = re.compile("(.*)@fnal.gov")
-        self.scope_user_re = re.compile("storage.write:[^ ]*/users/([^ ]*)")
+        self.scope_user_re = re.compile("storage[^ ]*/users/([^ ]*)")
         self.token_offset = len("Bearer ")
 
     def get_scitoken(self):
@@ -55,12 +55,17 @@ class ClientCache:
         
         cherrypy.log(f"get_username: {scitok=}")
         decoded = self.cheap_decode_token(scitok)
+        cherrypy.log(f'checking subject: {decoded["sub"]}')
         m = self.subj_user_re.match(decoded["sub"])
         if m:
+             cherrypy.log(f"Returning: {m.group(1)}")
              return m.group(1)
+        cherrypy.log(f'checking scope: {decoded["scope"]}')
         m = self.scope_user_re.search(decoded["scope"])
         if m:
+             cherrypy.log(f"Returning: {m.group(1)}")
              return m.group(1)
+        cherrypy.log(f"Returning: None!")
         return None
        
     def getdd_client(self):
@@ -85,7 +90,7 @@ class ClientCache:
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
-            self.mcccache[scitok] = MetaCatClient(token_file="/dev/null")
+            self.mcccache[scitok] = MetaCatClient(token_file="/tmp/tok")
             try:
                 self.mcccache[scitok].login_token(username, scitok)
             except:
@@ -156,6 +161,7 @@ client_cache = ClientCache()
 class ClientCacheMixin():
     def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
+        self.namespace = "sam"
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for dispatching/handling web calls via CherryPy
@@ -165,6 +171,7 @@ class Definitions(ClientCacheMixin):
 
     def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb definitions api """
+        cherrypy.log(f"Definitions: _cp_dispatch: {vpath=}")
         if len(vpath) == 1:
             # simple method like create
             return self
@@ -188,10 +195,11 @@ class Definitions(ClientCacheMixin):
 
     @cherrypy.expose
     def list(self, defname="", user="", group="", after="", before=""):
+        cherrypy.log("entering Definitions:list")
         client = self.client_cache.getmc_client()
         if not defname:
             defname = "*"
-        query = r"queries matching sam:{defname}"
+        query = f"queries matching {self.namespace}:{defname}"
         sep = "where"
         if user:
             query = f"{query} {sep} creator={user}"
@@ -203,7 +211,9 @@ class Definitions(ClientCacheMixin):
             query = f"{query} {sep} created_timestamp<'{before}'"
             sep = "and"
             
-        dlist = client.search_named_queries(query)
+        cherrypy.log(f"searching with {query=}")
+        dlist = list(client.search_named_queries(query))
+        cherrypy.log(f"got back {dlist=}")
         return "\n".join([ x["name"] for x in dlist ])
                     
     @cherrypy.expose
@@ -216,10 +226,7 @@ class Definitions(ClientCacheMixin):
 
     @cherrypy.expose
     def get(self, defname):
-        pass   
-
-    @cherrypy.expose
-    def list(self, defname):
+        cherrypy.log(f"Definitions.get: {defname=}")
         pass   
 
     @cherrypy.expose
@@ -276,7 +283,7 @@ class Files(ClientCacheMixin):
     def get_name_locations(self, name="", **kwargs):
         cherrypy.log(f"get_name_locations {name=}")
         rpclient = self.client_cache.getrrp_client()
-        data = list(rpclient.list_replicas( [{"scope":"hypot", "name":name}] ))
+        data = list(rpclient.list_replicas( [{"scope":self.namespace, "name":name}] ))
         cherrypy.log(f"get_name_locations: {data=}")
         rses = data[0]["rses"]
         res = []
@@ -464,6 +471,7 @@ class Api(ClientCacheMixin):
             vpath.insert(0, 'index')
             return self
         if vpath[0] in self.parts:
+            cherrypy.log(f"Api:_cp_dispatch: handing off to {vpath[0]}..")
             # for things in our parts array, hand off
             return self.parts[vpath.pop(0)]
         if len(vpath) == 3:
