@@ -22,8 +22,10 @@ there are areas where differing semantics need to be accounted for:
 * Adding general SAM file locations to Rucio would require an RSE that was not configured as "deterministic"
 * SAM "node" info in locations ("enstore:", "dcache:", etc.)  could be RSE's in Rucio, either directly or through a mapping
 * Files declared to Rucio via SAM would require automatic addition of suitable retention/replication rules.
-* SAM and MetaCat queries have subtly different syntax; some amount of translation is required.
-* SAM queries can blend project information and other metadata queries; this could possilby be implemented with a MetaCat plugin to include DataDispatcher project info, or by teaching the tranlation layer (above) to convert project related query info into file_id in (id1, id2, id3...) after querying DataDispatcher to get the file_id list.
+* SAM and MetaCat queries have different syntax; some amount of translation is required.
+* SAM queries can blend project information, location information, and other metadata queries; this could be implemented with 
+** a MetaCat plugin to include DataDispatcher project info, and one for Rucio location info, or by 
+** teaching the query tranlation layer (above) to convert project related query info into `id in (id1, id2, id3...)` after querying DataDispatcher to get the file_id list. and `name in (name1, name2 ...)` for location info after querying Rucio.
 
 
 
