@@ -16,6 +16,11 @@ from rucio.client.replicaclient import ReplicaClient
 
 class ClientCache:
 
+    # Note: there are now 4 caches in here that work almost the same
+    #     except for the object called to create the connection.
+    #     Better might be to have one cache class that you pass the
+    #     connection creator into, and make 4 instances of that class...
+
     def __init__(self):
         self.mcccache = {}
         self.mccexp = {}
@@ -146,6 +151,7 @@ class ClientCache:
         return self.rrpccache[scitok]
 
     def clean_expired(self):
+        # needs rucio caches!
         now = time.time()
         for tok in self.mccexp:
             if self.mccexp < now:
@@ -266,9 +272,31 @@ class Files(ClientCacheMixin):
             vpath.insert(0, "lineage")
             return self
 
+    def convert_sam_query(self, dims):
+        # totally insufficient currently...
+        dims = dims.replace("isparentof:", "parent")
+        dims = dims.replace("ischildof:", "children")
+        dims = dims.replace("defname:", "selected by")
+        dims = dims.replace("create_date", "created_timestamp")
+        dims = dims.replace("update_date", "updated_timestamp")
+        dims = dims.replace("user", "creator")
+        dims = dims.replace("with limit", "limit")
+        dims = dims.replace("with offset", "offset")
+        dims = dims.replace("file_id", "id")
+        dims = dims.replace("file_name", "name")
+        dims = dims.replace("file_size", "size")
+
+        if dims.find("selected by") >= 0:
+            return "files " + dims
+        else:
+            return "files where " + dims
+
     @cherrypy.expose
-    def list(self, **kwargs):
-        pass
+    def list(self, dims="", fileinfo="", **kwargs):
+        mquery = self.convert_sam_query(dims)
+        client = self.client_cache.getmc_client()
+        res = client.query(mquery)
+        return res
 
     @cherrypy.expose
     def count(self, **kwargs):
@@ -277,7 +305,6 @@ class Files(ClientCacheMixin):
     @cherrypy.expose
     def summary(self, **kwargs):
         pass
-
 
     @cherrypy.expose
     def get_name_locations(self, name="", **kwargs):
