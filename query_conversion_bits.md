@@ -54,12 +54,14 @@
 ## Rucio related
 
 * full_path
+* data_disk? 
+* node? 
 
 ## ddisp related ... 
 
-( need to query ddisp for these and convert to file id list(?))
+( need to use a ddisp filter for these )
 
-* consumer
+* consumer (=worker in ddisp)
 * consumer_process_description
 * consumer_process_id
 * project_description

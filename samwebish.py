@@ -10,6 +10,7 @@ from data_dispatcher.api import DataDispatcherClient
 from metacat.webapi import MetaCatClient
 from rucio.client import Client as RClient
 from rucio.client.replicaclient import ReplicaClient
+from query_converter.parse_tree import SAM_query_to_Metacat
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for authentication, client connection caching
@@ -57,6 +58,9 @@ class ClientCache:
         # if our subject is username@fnal.gov, take that
         # otherwise look for a username in the scope 
         # i.e. "storage.write:.../users/username" 
+        #
+        # note that this username guess isn't actually used except to log
+        # into backend services...
         
         cherrypy.log(f"get_username: {scitok=}")
         decoded = self.cheap_decode_token(scitok)
@@ -273,23 +277,7 @@ class Files(ClientCacheMixin):
             return self
 
     def convert_sam_query(self, dims):
-        # totally insufficient currently...
-        dims = dims.replace("isparentof:", "parent")
-        dims = dims.replace("ischildof:", "children")
-        dims = dims.replace("defname:", "selected by")
-        dims = dims.replace("create_date", "created_timestamp")
-        dims = dims.replace("update_date", "updated_timestamp")
-        dims = dims.replace("user", "creator")
-        dims = dims.replace("with limit", "limit")
-        dims = dims.replace("with offset", "offset")
-        dims = dims.replace("file_id", "id")
-        dims = dims.replace("file_name", "name")
-        dims = dims.replace("file_size", "size")
-
-        if dims.find("selected by") >= 0:
-            return "files " + dims
-        else:
-            return "files where " + dims
+        return SAM_query_to_MetaCat(dims)
 
     @cherrypy.expose
     def list(self, dims="", fileinfo="", **kwargs):
@@ -299,12 +287,15 @@ class Files(ClientCacheMixin):
         return res
 
     @cherrypy.expose
-    def count(self, **kwargs):
-        pass
+    def count(self, dims, **kwargs):
+        return self.summary(dims)["count"]
 
     @cherrypy.expose
-    def summary(self, **kwargs):
-        pass
+    def summary(self, dims, **kwargs):
+        mquery = self.convert_sam_query(dims)
+        client = self.client_cache.getmc_client()
+        res = client.query(mquery, summary="count")
+        return res
 
     @cherrypy.expose
     def get_name_locations(self, name="", **kwargs):
@@ -318,15 +309,36 @@ class Files(ClientCacheMixin):
             for pfn in rses[rse]:
                  ploc = pfn.find("/",9)
                  res.append(f"{rse}:{pfn[ploc:]}")
-        return "\n".join(res)
+        if "format" in kwargs and kwargs["format"] == "json":
+            res = json.dumps(res)
+        else:
+            res = "\n".join(res)
+        return res
 
     @cherrypy.expose
-    def put_name_locations(self, **kwargs):
-        pass
+    def put_name_locations(self, file, **kwargs):
+        rpclient = self.client_cache.getrrp_client()
+        mcclient = self.client_cache.getmc_client()
+  
+        if "add" in kwargs:
+            samloc = kwargs["add"]
+            rse, path = samloc.split(":",1)
+            metadata = mcclient.get_file(name=file, namespace=self.default_ns, with_metadata = True)
+            rclient.add_replica( rse, self.default_ns, file, metadata["size", metadata["checksums"]["adler32"] )
+        if "remove" in kwargs:
+            samloc = kwargs["remove"]
+            rse, path = samloc.split(":",1)
+            # not sure we should do this... I think for now this is a noop
+            # also not an api call to remove just one replica on an rse...
+            pass
+        return "ok"
 
     @cherrypy.expose
-    def get_name_metadata(self, **kwargs):
-        pass
+    def get_name_metadata(self, name=None, **kwargs):
+        mcclient = self.client_cache.getmc_client()
+        metadata = mcclient.get_file(name=file, namespace=self.default_ns, with_metadata = True)
+        # XXX call metadata converter...
+        return converted_metadata
 
     @cherrypy.expose
     def lineage(self, **kwargs):

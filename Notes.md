@@ -23,9 +23,8 @@ there are areas where differing semantics need to be accounted for:
 * SAM "node" info in locations ("enstore:", "dcache:", etc.)  could be RSE's in Rucio, either directly or through a mapping
 * Files declared to Rucio via SAM would require automatic addition of suitable retention/replication rules.
 * SAM and MetaCat queries have different syntax; some amount of translation is required.
-* SAM queries can blend project information, location information, and other metadata queries; this could be implemented with 
-  * a MetaCat plugin to include DataDispatcher project info, and one for Rucio location info, or by 
-  * teaching the query tranlation layer (above) to convert project related query info into `id in (id1, id2, id3...)` after querying DataDispatcher to get the file_id list. and `name in (name1, name2 ...)` for location info after querying Rucio.
+* SAM queries can blend project information, location information, and other metadata queries; this could be implemented with a MetaCat plugin to include DataDispatcher project info, and one for Rucio location info, or by 
+  * There is already a MetaCat Rucio-replicas plugin to get rse info from Rucio, which may include paths as well as rses in the rse data
+  * Could do one for DataDispatcher that  would take a project number and get you the file status info for the files in the project as metadatas
 
-
-
+* You can mimic SAM project behavior by creating DataDispatcher projects with a "project_name" attribute -- you can findProject them with project list with an attribute match, yeilding a project id... 
