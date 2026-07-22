@@ -15,9 +15,11 @@ class DimParseTreeError:
 
 
 def is_set_level_node( tree ):
+    logging.debug(f"is_set_level_node( {tree.__class__} )")
     for t in [ SetNode, DefinitionNode, MetaFilterNode, IsRelativeOfNode, WithNode, MetaDatasetNode ]:
         if isinstance(tree, t):
-            return t
+            return True
+    return False
 
 def meta_render_dimensions_tree(tree):
     """Pretty print the dimensions tree"""
@@ -979,9 +981,12 @@ class MetaCatTransformer(ParseTreeTransformer):
         return True
 
     def parent_sets(self, offset = 0):
-        if self.ptdepth <= 2:
+        logging.debug(f"parent_sets: {self.ptdepth=} {[x.__class__ for x in self.node_path]}")
+        if self.ptdepth < 2:
             return True
-        return is_set_level_node(self.node_path[self.ptdepth - 2])
+        res = is_set_level_node(self.node_path[self.ptdepth - 2])
+        logging.debug(f"parent_sets: returning {res}")
+        return  res
 
     def setboundary(self):
         if self.ptdepth > 0:
@@ -999,8 +1004,8 @@ class MetaCatTransformer(ParseTreeTransformer):
             self.node_path.append(node)
         else:
             self.node_path[self.ptdepth] = node
-        logging.debug(f"visiting {node}")
         self.ptdepth = self.ptdepth + 1
+        logging.debug(f"visiting {self.ptdepth=} {node=}")
         #actually visit
         node = ParseTreeTransformer.visit(self, node)
         #bookkeeping
@@ -1010,6 +1015,11 @@ class MetaCatTransformer(ParseTreeTransformer):
         # now add hoisted subtrees..
         if self.setboundary():
             
+            logging.debug(f"hoisting:")
+            logging.debug(f"{self.proj_terms=}")
+            logging.debug(f"{self.rse_terms=}")
+            logging.debug(f"{self.parentage_terms=}")
+            logging.debug(f"{self.snapshot_terms=}")
             if self.proj_terms:
                 self.modified = True
                 if len(self.proj_terms) > 1:
@@ -1073,8 +1083,10 @@ class MetaCatTransformer(ParseTreeTransformer):
         if node.dim in self.snapshot_dims:
             self.modified = True
             if self.parent_sets():
+                logging.debug(f"snapshot dim rendered here: {repr(node)}")
                 return MetaDatasetNode(node.value)
             else:
+                logging.debug(f"snapshot dim pushed up: {repr(node)}")
                 self.snapshot_terms.append(node)
                 return None
         return node
@@ -1091,8 +1103,10 @@ class MetaCatTransformer(ParseTreeTransformer):
     def visit_IsRelativeOfNode(self, node):
         if node.subtree:
             if self.parent_sets():
+               logging.debug(f"expanding here: {repr(node)}")
                return IsRelativeOfNode(node.relation, self.visit(node.subtree))
          
+            logging.debug(f"bumping up: {repr(node)}")
             self.parentage_terms.append(IsRelativeOfNode(node.relation,self.visit(node.subtree)))
         return None
 
@@ -1118,7 +1132,7 @@ class MetaCatTransformerPart2(ParseTreeTransformer):
         #  filter rucio_replicas () (files where pred1) where pred2 )
         # and similar
 
-        print(f"visit_SetNode: here, {repr(node.nodes)}")
+        logging.debug(f"visit_SetNode: here, {repr(node.nodes)}")
         hangunder = None
         tohang = None
         i=0
@@ -1216,11 +1230,11 @@ def formatTree(tree):
 
 def SAM_query_to_MetaCat(dims):
     t = parser.parse_string(dims)
-    #print("parse tree: ", str(t), "\n\n")
-    #print("-------------------")
+    #logging.debug("parse tree: ", str(t), "\n\n")
+    #logging.debug("-------------------")
     mt = MetaCatTransformer().visit(t)
     mt = MetaCatTransformerPart2().visit(mt)
-    #print("meta tree: ", str(mt), "\n\n")
+    #logging.debug("meta tree: ", str(mt), "\n\n")
     meta = meta_render_dimensions_tree(mt)
     return meta
 
@@ -1246,16 +1260,3 @@ __all__ = [
     "MetaCatTransformerPart2",
     "SAM_query_to_MetaCat",
 ]
-
-if __name__ == "__main__":
-    import sys
-
-    loglevel = logging.INFO
-    if "-d" in sys.argv:
-        loglevel = logging.DEBUG
-
-    logging.basicConfig(level = loglevel )
-
-
-    for line in sys.stdin:
-        print( SAM_query_to_MetaCat(line.strip()) )
