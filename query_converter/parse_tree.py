@@ -294,12 +294,15 @@ class SetNode(BinaryOperatorNode, NegatableNode):
         return hash((BinaryOperatorNode.__hash__(self), self.negated))
 
     def meta_render(self):
+        if self.negated:
+            raise NotImplementedError("cannot negate set operations in Metacat")
         notnonelen = sum([1 for n in self.nodes if n])
+        if  notnonelen == 0:
+            return 
         if  notnonelen == 1:
             return self.nodes[0].meta_render()
-        if self.negated:
-            yield "not"
-            yield "("
+        # debugging
+        # yield f"[{notnonelen=} {repr(self.nodes)}]"
         if self.op in ("union", "intersect"):
             if self.op == "intersect":
                 m_op = "join"
@@ -322,8 +325,6 @@ class SetNode(BinaryOperatorNode, NegatableNode):
         else:
             for t in BinaryOperatorNode.meta_render(self):
                 yield t
-        if self.negated:
-            yield ")"
 
     def render(self):
         if self.negated:
@@ -978,7 +979,7 @@ class MetaCatTransformer(ParseTreeTransformer):
         return True
 
     def parent_sets(self, offset = 0):
-        if self.ptdepth  < 2:
+        if self.ptdepth <= 2:
             return True
         return is_set_level_node(self.node_path[self.ptdepth - 2])
 
@@ -1117,6 +1118,7 @@ class MetaCatTransformerPart2(ParseTreeTransformer):
         #  filter rucio_replicas () (files where pred1) where pred2 )
         # and similar
 
+        print(f"visit_SetNode: here, {repr(node.nodes)}")
         hangunder = None
         tohang = None
         i=0
@@ -1142,6 +1144,10 @@ class MetaCatTransformerPart2(ParseTreeTransformer):
         # fix 'join(files something, files where)'
         if node.op == 'intersect' and isinstance(node.nodes[1],BinaryOperatorNode) and not node.nodes[1].nodes:
              node = node.nodes[0]
+
+        if node.op == 'intersect' and isinstance(node.nodes[1],IsRelativeOfNode):
+             if node.nodes[1].subtree == None:
+                 node = node.nodes[0]
 
         return node
              
