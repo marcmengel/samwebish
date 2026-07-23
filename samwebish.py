@@ -228,25 +228,29 @@ class Definitions(ClientCacheMixin):
                     
     @cherrypy.expose
     def create(self, defname, dims, user):
-        pass
+        client = self.client_cache.getmc_client()
+        mq = SAM_query_to_MetaCat(dims)
+        client.create_named_query( self.default_namespace, defname, mq )
 
     @cherrypy.expose
     def delete(self, defname, dims, user):
-        pass
+        raise NotImplementedError()
 
     @cherrypy.expose
     def get(self, defname):
-        cherrypy.log(f"Definitions.get: {defname=}")
-        pass   
+        client = self.client_cache.getmc_client()
+        return client.get_named_query(self.default_namespace, defname)
 
     @cherrypy.expose
     def count(self, defname):
+        return self.summary(defname)["count"]
         pass
 
     @cherrypy.expose
     def summary(self, defname):
-        pass
-
+        client = self.client_cache.getmc_client()
+        res = client.query("files selected by {self.default_namespace}:{defname}" , summary="count")
+        return res
 
 class Files(ClientCacheMixin):
     """ dispatcher and methods for /api/files paths """
