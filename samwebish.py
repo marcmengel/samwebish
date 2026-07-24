@@ -172,6 +172,7 @@ class ClientCacheMixin():
     def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
         self.namespace = "sam"
+        self.mcc = MetaDataConverter(experiment=os.environment("SAM_EXPERIMENT"))
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for dispatching/handling web calls via CherryPy
@@ -341,16 +342,53 @@ class Files(ClientCacheMixin):
     def get_name_metadata(self, name=None, **kwargs):
         mcclient = self.client_cache.getmc_client()
         metadata = mcclient.get_file(name=file, namespace=self.default_ns, with_metadata = True)
-        # XXX call metadata converter...
+        converted_metadata = self.mcc.convert_all_mc_sam(metadata)
         return converted_metadata
 
+    def traverse_linage( self, mcclient, name, ltype, raw = False ):
+        data = mcclient.get_file(name=name, namespace=self.default_ns,with_provenance=True)
+        res1 = data[ltype]
+        res = []
+        if raw:
+            if len(res1) == 0:
+                res.append( f"{self.default_ns}:{name}" )
+        else:
+            res.extend(res1)
+        for fid in res1:
+            cname = res1.split(":")[1]
+            nextgen = self.traverse_lineage( mcclient, cname, ltype, raw)
+            if raw and len(nextgen == 0):
+                res.append( f"{self.default_ns}:{cname}")
+            else:
+                res.extend( nextgen )
+        return res
+       
     @cherrypy.expose
-    def lineage(self, **kwargs):
-        pass
+    def lineage(self, name, ltype, format="plain", **kwargs):
+        # ltype is: parents, children, rawancestors
+        mcclient = self.client_cache.getmc_client()
+        data = mcclient.get_file(name=file, namespace=self.default_ns,with_provenance=True)
+        if ltype in {"parents", "children"}:
+            res = data[ltype]
+        if ltype == "ancestors":
+            res = self.traverse_lineage( mcclient, name, "parents")
+        if ltype == "descendants":
+            res = self.traverse_lineage( mcclient, name, "children")
+        if ltype == "rawancestors":
+            res = self.traverse_lineage( mcclient, name, "parents", raw = True )
+
+        if format == "json":
+            return json.dumps(res)
+        else:
+            return "\n".join(res)
 
     @cherrypy.expose
-    def post(self, **kwargs):
-        pass
+    def post(self, metadata, **kwargs):
+        """ declare a file... """
+        mcclient = self.client_cache.getmc_client()
+        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
+        mcclient.declare_files(self.default_dataset, [ mc_metadata ], self.default_namespace)
+        return ""
 
     @cherrypy.expose
     def validate_metadata(self, **kwargs):
