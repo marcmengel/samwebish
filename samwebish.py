@@ -245,7 +245,6 @@ class Definitions(ClientCacheMixin):
     @cherrypy.expose
     def count(self, defname):
         return self.summary(defname)["count"]
-        pass
 
     @cherrypy.expose
     def summary(self, defname):

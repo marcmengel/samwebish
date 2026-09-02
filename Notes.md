@@ -28,3 +28,10 @@ there are areas where differing semantics need to be accounted for:
   * Could do one for DataDispatcher that  would take a project number and get you the file status info for the files in the project as metadatas
 
 * You can mimic SAM project behavior by creating DataDispatcher projects with a "project_name" attribute -- you can findProject them with project list with an attribute match, yeilding a project id... 
+* Rucio Rules vs SAM locations -- If we just tell Rucio a file exists, but do not add any sort of rule , Rucio will just delete it because no rules want it.  So we need to have a dataset for "all current SAM file locations at RSE x" and add files to it  when we add the locations to SAM, and remove files from it when we remove the SAM locations, so that Rucio will clean up.   Note that folks using SAM will go in and directly remove the file behind Rucios back and then remove the location, so this will hopefully let Rucio figure it out (?) 
+
+## Extra notes on project-based queries
+
+So a SAM query that uses project_name, etc. and/or checks for project data (completion_status, etc.) needs to be converted to a MetaCat query that uses a data_dispatchr filter; but the filter needs *input*, so we should rely on a dataset existing named default:snapshot_for_project_<project_name> as the input query to the filter, which will add the project info for each file.   To make this a continuing feature ,when we start a project under samwebish, we need to not only hand the project files to data_dispatcher, and a project_name= metadata attribute, but we need to create a default:snapshot_for_project_<project_name> datset in metacat  to go with it, with the same files.   Then when we later convert the query for the project, the metacat dataset will exist.   
+
+I sort of wonder whether we should add that behavior to the base data_dispatcher client, where it always does that, or just have it be a property of samwebish...
