@@ -13,6 +13,21 @@ from rucio.client.replicaclient import ReplicaClient
 from query_converter.parse_tree import SAM_query_to_Metacat
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# lifted from original samweb
+
+def _decodeJSONBody():
+    """ decode the request body, assuming it to be JSON
+    """
+    if cherrypy.request.body is None or cherrypy.request.headers['Content-Type'] != 'application/json':
+        raise SAMWebBadRequest("JSON data required")
+    try:
+        return convert_unicode_to_ascii(json.load(cherrypy.request.body))
+    except ValueError as ex:
+        raise SAMWebBadRequest("Invalid JSON data: %s" % ex)
+    except UnicodeEncodeError:
+        raise SAMWebBadRequest("JSON data contains non-ascii characters")
+
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for authentication, client connection caching
 
 class ClientCache:
@@ -334,7 +349,6 @@ class Files(ClientCacheMixin):
             rse, path = samloc.split(":",1)
             # not sure we should do this... I think for now this is a noop
             # also not an api call to remove just one replica on an rse...
-            pass
         return "ok"
 
     @cherrypy.expose
@@ -382,8 +396,9 @@ class Files(ClientCacheMixin):
             return "\n".join(res)
 
     @cherrypy.expose
-    def post(self, metadata, **kwargs):
+    def post(self, **kwargs):
         """ declare a file... """
+        metadata = _decodeJSONBody()
         mcclient = self.client_cache.getmc_client()
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         mcclient.declare_files(self.default_dataset, [ mc_metadata ], self.default_namespace)
@@ -391,23 +406,54 @@ class Files(ClientCacheMixin):
 
     @cherrypy.expose
     def validate_metadata(self, **kwargs):
+        mcclient = self.client_cache.getmc_client()
+        metadata = _decodeJSONBody()
+        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
+        try:
+            resp = mcclient.declare_files(files=[mc_metadata], dry_run=True)
+            cherrypy.response.status = 204
+            return ""
+        except:
+            raise InvalidMetadata("Metadata is invalid")
+
+    @cherrypy.expose
+    def put_name_metadata(self, name, *kwargs):
+        mcclient = self.client_cache.getmc_client()
+        metadata = _decodeJSONBody()
+        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
+        did = f"{self.default_dataset}:{name}"
+        mcclient.update_file_metadata(mc_metadata["metadata"], dids=[did])
+        cherrypy.response.status = 204
+        return ""
+
+    @cherrypy.expose
+    def put_id_metadata(self, file_id, metadata, **kwargs):
+        mcclient = self.client_cache.getmc_client()
+        metadata = _decodeJSONBody()
+        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
+        mcclient.update_file_metadata(mc_metadata["metadata"], fids=[file_id])
+        cherrypy.response.status = 204
+        return ""
         pass
 
     @cherrypy.expose
-    def put_name_metadata(self, **kwargs):
-        pass
-
-    @cherrypy.expose
-    def put_id_metadata(self, **kwargs):
-        pass
-
-    @cherrypy.expose
-    def put_name_content_status(self, **kwargs):
-        pass
+    def put_name_content_status(self, name, **kwargs):
+        status = cherrypy.request.body
+        mcclient = self.client_cache.getmc_client()
+        metadata = _decodeJSONBody()
+        mcclient.update_file_metadata({"core.content_status":status}, fids=[file_id])
+        cherrypy.response.status = 204
+        return ""
 
     @cherrypy.expose
     def put_id_content_status(self, **kwargs):
-        pass
+        status = cherrypy.request.body
+        metadata = _decodeJSONBody()
+        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
+        did = f"{self.default_dataset}:{name}"
+        mcclient.update_file_metadata({"core.content_status":status}, dids=[did])
+        cherrypy.response.status = 204
+        return ""
 
 class Users(ClientCacheMixin):
     """ dispatcher and methods for /api/users paths """
