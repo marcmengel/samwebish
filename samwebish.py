@@ -50,6 +50,7 @@ class ClientCache:
         self.subj_user_re = re.compile("(.*)@fnal.gov")
         self.scope_user_re = re.compile("storage[^ ]*/users/([^ ]*)")
         self.token_offset = len("Bearer ")
+        self.last_file_did = {}
 
     def get_scitoken(self):
         """ extract scitoken from Authorization: header """
@@ -573,6 +574,11 @@ class Projects(ClientCacheMixin):
         ddclient = self.client_cache.getmc_client()
         res = ddclient.next_file(project_id=project, worker_id=processid)
         # just return the url from the first replica 
+        name = res["handle"]["replicas"][0]["name"]
+        namespace = res["handle"]["replicas"][0]["namespace"]
+        if  f"{namespace}:{name}" in self.last_file_did
+            raise ReleaseFileFirst()
+        self.last_file_did[f"{project}/{worker_id}"] = f"{namespace}:{name}"
         return res["handle"]["replicas"][0]["url"]
 
     @cherrypy.expose
@@ -584,6 +590,8 @@ class Projects(ClientCacheMixin):
     @cherrypy.expose
     def releaseFile(self, station, project, processid, status,  **kwargs):
         ddclient = self.client_cache.getmc_client()
+        did = self.last_file_did[f"{project}/{worker_id}"]
+        del self.last_file_did[f"{project}/{worker_id}"]
         if status == 'ok':
             ddclient.file_done(project, did, processid)
         else:
