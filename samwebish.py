@@ -434,7 +434,6 @@ class Files(ClientCacheMixin):
         mcclient.update_file_metadata(mc_metadata["metadata"], fids=[file_id])
         cherrypy.response.status = 204
         return ""
-        pass
 
     @cherrypy.expose
     def put_name_content_status(self, name, **kwargs):
@@ -469,28 +468,28 @@ class Users(ClientCacheMixin):
             vpath.insert(0,f"{method}_by_{findby}")
 
     @cherrypy.expose
-    def get(self, username=None, status=None):
-        pass
+    def get(self, username=None, format='plain',  status=None):
+        raise NotImplementedError()
 
     @cherrypy.expose
     def post(self, jsondata):
-        pass
+        raise NotImplementedError()
 
     @cherrypy.expose
     def get_by_name(self, nameorid):
-        pass
-
+        raise NotImplementedError()
+        
     @cherrypy.expose
     def get_by_id(self, nameorid):
-        pass
+        raise NotImplementedError()
 
     @cherrypy.expose
     def put_by_name(self, nameorid, jsondata):
-        pass
+        raise NotImplementedError()
 
     @cherrypy.expose
     def put_by_id(self, nameorid, jsondata):
-        pass
+        raise NotImplementedError()
 
 class Values(ClientCacheMixin):
     """ dispatcher and methods for /api/values paths """
@@ -503,25 +502,43 @@ class Values(ClientCacheMixin):
 
     @cherrypy.expose
     def get_parameters(self, **kwargs):
-        pass
+        mcclient = self.client_cache.getmc_client()
+        keylist = mcclient.report_metadata_keys()
+        return "\n".join(keylist)
 
     @cherrypy.expose
     def post_parameters(self, **kwargs):
-        pass
+        # don't need to pre-post parameters in MetaCat, so 
+        cherrypy.response.status = 204
+        return ""
 
     @cherrypy.expose
     def get_applications(self, **kwargs):
-        pass
+        mcclient = self.client_cache.getmc_client()
+        vlist = mcclient.report_metadata_values("app.version")
+        flist = mcclient.report_metadata_values("app.family")
+        nlist = mcclient.report_metadata_values("app.name")
+        # well, we don't actually easily get the correlations, so...
+        # just permute the families, names and verions.
+        res=[]
+        for f in flist:
+            for n in nlist:
+                for v in vlist
+                    res.append(f"{f}   {n}    {v}")
+        return "\n".join(res)
 
     @cherrypy.expose
     def post_applications(self, **kwargs):
-        pass
+        # don't need to pre-post applications in MetaCat, so 
+        # just say its "ok"...
+        cherrypy.response.status = 204
+        return ""
 
 class Projects(ClientCacheMixin):
     """ dispatcher and methods for /api/project paths """
 
     def _cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb files api """
+        """ handle various REST-ish parsing of samweb projects api """
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
         if len(vpath) == 2:
@@ -541,34 +558,61 @@ class Projects(ClientCacheMixin):
             cherrypy.request.params['processid'] = vpath.pop(0)
 
     @cherrypy.expose
-    def status(self, **kwargs):
-        pass
+    def status(self, station, project, **kwargs):
+        ddclient = self.client_cache.getmc_client()
+        res = ddclient.get_project(project)
+        return res['state']
+
     @cherrypy.expose
-    def establishProcess(self, **kwargs):
-        pass
+    def establishProcess(self, station, project, **kwargs):
+        ddclient = self.client_cache.getmc_client()
+        return ddclient.random_worker_id()
+        
     @cherrypy.expose
-    def getNextFile(self, **kwargs):
-        pass
+    def getNextFile(self, station, project, processid,  **kwargs):
+        ddclient = self.client_cache.getmc_client()
+        res = ddclient.next_file(project_id=project, worker_id=processid)
+        # just return the url from the first replica 
+        return res["handle"]["replicas"][0]["url"]
+
     @cherrypy.expose
-    def updateFileStatus(self, **kwargs):
-        pass
+    def updateFileStatus(self, station, project, processid, status,  **kwargs):
+        # don't need to do this...
+        cherrypy.response.status = 204
+        return ""
+
     @cherrypy.expose
-    def releaseFile(self, **kwargs):
-        pass
+    def releaseFile(self, station, project, processid, status,  **kwargs):
+        ddclient = self.client_cache.getmc_client()
+        if status == 'ok':
+            ddclient.file_done(project, did, processid)
+        else:
+            ddclient.file_failed(project, did, processid)
+        cherrypy.response.status = 204
+        return ""
+
     @cherrypy.expose
-    def endProcess(self, **kwargs):
-        pass
+    def endProcess(self, station, project, processid, status,  **kwargs):
+        # don't need to do this...
+        cherrypy.response.status = 204
+        return ""
+
     @cherrypy.expose
-    def status(self, **kwargs):
+    def status(self, station, project, processid, **kwargs):
+        ddclient = self.client_cache.getmc_client()
         pass
+
     @cherrypy.expose
-    def endProject(self, **kwargs):
+    def endProject(self, station, project, status, **kwargs):
+        ddclient = self.client_cache.getmc_client()
         pass
     @cherrypy.expose
     def get(self, **kwargs):
+        ddclient = self.client_cache.getmc_client()
         pass
     @cherrypy.expose
     def dumpProject(self, **kwargs):
+        ddclient = self.client_cache.getmc_client()
         pass
     @cherrypy.expose
     def summary(self, **kwargs):
