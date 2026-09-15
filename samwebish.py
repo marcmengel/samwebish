@@ -344,7 +344,7 @@ class Files(ClientCacheMixin):
             samloc = kwargs["add"]
             rse, path = samloc.split(":",1)
             metadata = mcclient.get_file(name=file, namespace=self.default_ns, with_metadata = True)
-            rclient.add_replica( rse, self.default_ns, file, metadata["size", metadata["checksums"]["adler32"] )
+            rclient.add_replica( rse, self.default_ns, file, metadata["size"], metadata["checksums"]["adler32"] )
         if "remove" in kwargs:
             samloc = kwargs["remove"]
             rse, path = samloc.split(":",1)
@@ -524,7 +524,7 @@ class Values(ClientCacheMixin):
         res=[]
         for f in flist:
             for n in nlist:
-                for v in vlist
+                for v in vlist:
                     res.append(f"{f}   {n}    {v}")
         return "\n".join(res)
 
@@ -576,7 +576,7 @@ class Projects(ClientCacheMixin):
         # just return the url from the first replica 
         name = res["handle"]["replicas"][0]["name"]
         namespace = res["handle"]["replicas"][0]["namespace"]
-        if  f"{namespace}:{name}" in self.last_file_did
+        if  f"{namespace}:{name}" in self.last_file_did:
             raise ReleaseFileFirst()
         self.last_file_did[f"{project}/{worker_id}"] = f"{namespace}:{name}"
         return res["handle"]["replicas"][0]["url"]
