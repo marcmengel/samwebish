@@ -3,7 +3,7 @@ import sys
 import os
 from parse_tree import *
 from random import random, randint, choice, seed
-from parser import DimParserError
+from .parser import DimParserError
 
 #def genTree(d):
 #    print "genTree(%d)" % d

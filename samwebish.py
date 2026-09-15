@@ -6,11 +6,13 @@ import os
 import re
 import time
 import traceback
+
 from data_dispatcher.api import DataDispatcherClient
 from metacat.webapi import MetaCatClient
 from rucio.client import Client as RClient
 from rucio.client.replicaclient import ReplicaClient
-from query_converter.parse_tree import SAM_query_to_Metacat
+from query_converter.parse_tree import SAM_query_to_MetaCat
+from metadata_converter import MetadataConverter
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # lifted from original samweb
@@ -54,6 +56,7 @@ class ClientCache:
 
     def get_scitoken(self):
         """ extract scitoken from Authorization: header """
+        print(f"headers: {cherrypy.request.headers}")
         authheader = cherrypy.request.headers.get("Authorization","")
         if not authheader:
             raise cherrypy.HTTPError(401, 'SciToken athentication required')
@@ -150,7 +153,7 @@ class ClientCache:
     def getrrp_client(self):
         """ get rucio Client for this client """
         scitok = self.get_scitoken()
-        if not scitok in self.rrpccache or self.rrcpexp[scitok] < time.time():
+        if not scitok in self.rrpccache or self.rrpcexp[scitok] < time.time():
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
@@ -188,7 +191,7 @@ class ClientCacheMixin():
     def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
         self.namespace = "sam"
-        self.mcc = MetaDataConverter(experiment=os.environment("SAM_EXPERIMENT"))
+        self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT",""))
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for dispatching/handling web calls via CherryPy
@@ -323,6 +326,8 @@ class Files(ClientCacheMixin):
         rpclient = self.client_cache.getrrp_client()
         data = list(rpclient.list_replicas( [{"scope":self.namespace, "name":name}] ))
         cherrypy.log(f"get_name_locations: {data=}")
+        if not data:
+            raise cherrypy.HTTPError(404, 'Location not found')
         rses = data[0]["rses"]
         res = []
         for rse in rses:
@@ -698,6 +703,15 @@ class Api(ClientCacheMixin):
 
 
 def main():
+    server_config={
+        'server.socket_host': '0.0.0.0',
+        'server.socket_port':4883,
+
+        'server.ssl_module':'pyopenssl',
+        'server.ssl_certificate':'./certs/server_cert.pem',
+        'server.ssl_private_key':'./certs/server_key.pem',
+    }
+    cherrypy.config.update(server_config)
     cherrypy.tree.mount(Api(), '/api')
 
     cherrypy.engine.start()

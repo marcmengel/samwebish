@@ -1291,7 +1291,6 @@ def formatTree(tree):
     formatter = TreeFormatter()
     return " ".join(formatter.visit(tree))
 
-
 def SAM_query_to_MetaCat(dims):
     import parser
     t = parser.parse_string(dims)

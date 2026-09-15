@@ -6,7 +6,7 @@ import threading
 #import samutil.parser
 from pyparsing import *
 
-from parse_tree import *
+from .parse_tree import *
 
 #from dimension_query.exc import DimParserError, ForbiddenQuery
 class DimParserError(Exception):
