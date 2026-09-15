@@ -191,6 +191,7 @@ class ClientCacheMixin():
     def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
         self.namespace = "sam"
+        self.namespace = "mengel"
         self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT",""))
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -327,17 +328,20 @@ class Files(ClientCacheMixin):
         data = list(rpclient.list_replicas( [{"scope":self.namespace, "name":name}] ))
         cherrypy.log(f"get_name_locations: {data=}")
         if not data:
-            raise cherrypy.HTTPError(404, 'Location not found')
-        rses = data[0]["rses"]
+            return '[]'
+            #raise cherrypy.HTTPError(404, 'Location not found')
+        pfns = data[0]["pfns"]
         res = []
-        for rse in rses:
-            for pfn in rses[rse]:
-                 ploc = pfn.find("/",9)
-                 res.append(f"{rse}:{pfn[ploc:]}")
-        if "format" in kwargs and kwargs["format"] == "json":
-            res = json.dumps(res)
-        else:
+        for pfn, dat in pfns.items():
+            rse = dat['rse']
+            ploc = pfn.find("/",9)
+            res.append( {"location": f"{rse}:{pfn[ploc:]}"} )
+        if "format" in kwargs and kwargs["format"] == "plain":
             res = "\n".join(res)
+        else:
+            res = json.dumps(res)
+       
+        cherrypy.log(f"get_name_locations: {res=}")
         return res
 
     @cherrypy.expose
