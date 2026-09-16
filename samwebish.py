@@ -118,7 +118,8 @@ class ClientCache:
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
-            self.mcccache[scitok] = MetaCatClient(token_file="/tmp/tok")
+            #self.mcccache[scitok] = MetaCatClient(token_file="/tmp/tok")
+            self.mcccache[scitok] = MetaCatClient()
             try:
                 self.mcccache[scitok].login_token(username, scitok)
             except:
@@ -225,7 +226,7 @@ class Definitions(ClientCacheMixin):
             return self
 
     @cherrypy.expose
-    def list(self, defname="", user="", group="", after="", before=""):
+    def list(self, defname="", user="", group="", after="", before="", format=""):
         cherrypy.log("entering Definitions:list")
         client = self.client_cache.getmc_client()
         if not defname:
@@ -251,16 +252,27 @@ class Definitions(ClientCacheMixin):
     def create(self, defname, dims, user):
         client = self.client_cache.getmc_client()
         mq = SAM_query_to_MetaCat(dims)
-        client.create_named_query( self.default_namespace, defname, mq )
+        client.create_named_query( self.namespace, defname, mq )
 
     @cherrypy.expose
-    def delete(self, defname, dims, user):
+    def delete(self, defname, dims, user, format="json"):
         raise NotImplementedError()
 
     @cherrypy.expose
-    def get(self, defname):
+    def get(self, defname, format="json"):
         client = self.client_cache.getmc_client()
-        return client.get_named_query(self.default_namespace, defname)
+        res =  client.get_named_query(self.namespace, defname)
+        cherrypy.log(f"got {res=} for {defname=}")
+        if format=="plain":
+            res = f"""
+Definition Name: {defname}
+  Definition Id: {res['created_timestamp']}
+  Creation Date: {time.strftime("%Y-%M-%D %h:%m:%s", time.gmtime(res['created_timestamp']))}
+       Username: {res['creator']}
+          Group: None
+     Dimensions: {res['source']}"""
+
+        return res
 
     @cherrypy.expose
     def count(self, defname):
@@ -269,7 +281,7 @@ class Definitions(ClientCacheMixin):
     @cherrypy.expose
     def summary(self, defname):
         client = self.client_cache.getmc_client()
-        res = client.query("files selected by {self.default_namespace}:{defname}" , summary="count")
+        res = client.query("files selected by {self.namespace}:{defname}" , summary="count")
         return res
 
 class Files(ClientCacheMixin):
@@ -411,7 +423,7 @@ class Files(ClientCacheMixin):
         metadata = _decodeJSONBody()
         mcclient = self.client_cache.getmc_client()
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
-        mcclient.declare_files(self.default_dataset, [ mc_metadata ], self.default_namespace)
+        mcclient.declare_files(self.default_dataset, [ mc_metadata ], self.namespace)
         return ""
 
     @cherrypy.expose
