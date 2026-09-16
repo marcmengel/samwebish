@@ -1,7 +1,7 @@
 
 start_server() {
     (
-      . setup.sh
+      . ./setup.sh
       python samwebish.py > server.out 2>&1 &
       echo $! > server.pid
     )
@@ -40,6 +40,7 @@ run_expecting()  {
    fi
 }
 
+start_server
 run_expecting "samweb locate-file a.fcl" "FNAL_DCACHE_DISK_TEST" "/pnfs/fnal.gov/" "a.fcl"
 run_expecting "samweb list-definitions" "tst_q_1710507530" "tst_q_1710508175"
 run_expecting "samweb describe-definition tst_q_1710508175" "Definition Name: tst_q_1710508175" "Dimensions: files from mengel:tst1710508175"

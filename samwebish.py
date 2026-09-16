@@ -191,7 +191,8 @@ client_cache = ClientCache()
 class ClientCacheMixin():
     def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
-        self.namespace = "sam"
+        #self.namespace = "sam"
+        # for testing:
         self.namespace = "mengel"
         self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT",""))
 
@@ -276,12 +277,15 @@ Definition Name: {defname}
 
     @cherrypy.expose
     def count(self, defname):
-        return self.summary(defname)["count"]
+        sdict = self.summary(defname)
+        cherrypy.log(f"got {sdict=} {sdict['count']}")
+        return str(sdict['count'])
 
     @cherrypy.expose
     def summary(self, defname):
         client = self.client_cache.getmc_client()
-        res = client.query("files selected by {self.namespace}:{defname}" , summary="count")
+        res = list(client.query(f"files selected by {self.namespace}:{defname}" , summary="count"))[0]
+        cherrypy.log(f"got {res=}")
         return res
 
 class Files(ClientCacheMixin):
