@@ -1,0 +1,25 @@
+{
+ "file_name": "202609171449a.fcl",
+ "create_date": "2016-10-11T15:49:15+00:00",
+ "user": "mengel",
+ "update_date": "2018-09-11T15:30:42+00:00",
+ "update_user": "mengel",
+ "file_size": 11,
+ "checksum": [
+  "enstore:2032996163",
+  "md5:3fe7b9af0a548b18934c69a842314400",
+  "adler32:795b0f44"
+ ],
+ "content_status": "good",
+ "file_type": "unknown",
+ "file_format": "unknown",
+ "end_time": "2016-10-01T00:00:00+00:00",
+ "Dataset.Tag": "gen_cfg",
+ "runs": [
+  [
+   1,
+   0,
+   "test"
+  ]
+ ]
+}

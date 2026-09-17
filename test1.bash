@@ -2,7 +2,7 @@
 
 start_server() {
     (
-      . ./setup.sh
+      . ./testdata/setup.sh
       python samwebish.py > server.out 2>&1 &
       echo $! > server.pid
     )
@@ -20,7 +20,7 @@ start_server() {
     # let server wake up...
 }
 
-. ./setup_client.sh
+. ./testdata/setup_client.sh
 
 verbose_check() {
    if [ "$1" = "-v" ] 
@@ -50,10 +50,32 @@ failed() {
 
 run_expecting()  {
 
-   cmd=$1
+   if [ "$1" = "-f" ]
+   then
+       expect_fail=true
+       expect_success=false
+       shift
+   else
+       expect_fail=false
+       expect_success=true
+   fi
+
+   cmd="$1"
    shift
    fc=0
-   out=$($cmd)
+   out=$($cmd 2>&1)
+   ec=$?
+
+   if $expect_fail && [ $ec = 0 ]
+   then
+       failed "$cmd exitcode $ec"
+       return
+   fi
+   if $expect_success && [ $ec != 0 ]
+   then
+       failed "$cmd exitcode $ec"
+       return
+   fi
    for pat in "$@"
    do
        if echo "$out" | grep "$pat" > /dev/null 
@@ -68,10 +90,13 @@ run_expecting()  {
    then 
        succeeded "$cmd"
    fi
+   return $ec
 }
 
 verbose_check "$@"
+
 start_server
+
 run_expecting "samweb locate-file a.fcl" "FNAL_DCACHE_DISK_TEST" "/pnfs/fnal.gov/" "a.fcl"
 run_expecting "samweb list-definitions" "tst_q_1710507530" "tst_q_1710508175"
 run_expecting "samweb describe-definition tst_q_1710508175" "Definition Name: tst_q_1710508175" "Dimensions: files from mengel:tst1710508175"
@@ -82,6 +107,15 @@ run_expecting "samweb list-files --summary defname:gen_cfg" "File count:" "5" "T
 run_expecting "samweb get-metadata b.fcl" "file_size:" "20"
 run_expecting "samweb get-metadata --json b.fcl" '"file_size":' "20" "{" 
 
+
+ds=$(date "+%Y%m%d%H%M%S")
+sed -e "s/@DATESTAMP@/$ds/" \
+   < testdata/md_new_file_template.json \
+   > testdata/md_new_file.json
+
+run_expecting "samweb declare-file testdata/md_new_file.json" 
+run_expecting -f "samweb declare-file testdata/md_file_exists.json" "already exists"
+run_expecting -f "samweb declare-file testdata/md_bad_checksum.json"  "checksum md5: value is wrong length" 
 
 echo
 
