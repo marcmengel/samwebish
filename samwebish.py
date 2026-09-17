@@ -481,7 +481,6 @@ class Files(ClientCacheMixin):
             raise cherrypy.HTTPError(409, 'File already exists')
         except InvalidMetadataError as e:
             raise cherrypy.HTTPError(400, f'Invalid metadata: {e}')
-       
             
         cherrypy.response.status = 204
         return ""
@@ -496,7 +495,7 @@ class Files(ClientCacheMixin):
             cherrypy.response.status = 204
             return ""
         except:
-            raise InvalidMetadata("Metadata is invalid")
+            raise cherrypy.HTTPError(400, f'Invalid metadata: {e}')
 
     @cherrypy.expose
     def put_name_metadata(self, name, *kwargs):
@@ -623,35 +622,40 @@ class Projects(ClientCacheMixin):
         """ handle various REST-ish parsing of samweb projects api """
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
+            
         if len(vpath) == 2:
             # stationname/projectname
             cherrypy.request.params['station'] = vpath.pop(0)
             cherrypy.request.params['project'] = vpath.pop(0)
             vpath.insert(0, cherrypy.request.method.lower())
+            return self
         if len(vpath) == 3:
-            # stationname/projectname/method
-            cherrypy.request.params['station'] = vpath.pop(0)
-            cherrypy.request.params['project'] = vpath.pop(0)
+            # id/project_id/method
+            assert(vpath[0] == 'id')
+            vpath.pop()
+            cherrypy.request.params['project_id'] = vpath.pop(0)
+            return self
         if len(vpath) == 5:
-            # stationname/projectname/processes/<processid>/method
-            cherrypy.request.params['station'] = vpath.pop(0)
-            cherrypy.request.params['project'] = vpath.pop(0)
+            # id/project_id/processes/<processid>/method
+            assert(vpath[0] == 'id')
+            vpath.pop()
+            cherrypy.request.params['project_id'] = vpath.pop(0)
             vpath.pop()
             cherrypy.request.params['processid'] = vpath.pop(0)
 
     @cherrypy.expose
-    def status(self, station, project, **kwargs):
+    def status(self, station=None, project=None, project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
         res = ddclient.get_project(project)
         return res['state']
 
     @cherrypy.expose
-    def establishProcess(self, station, project, **kwargs):
+    def establishProcess(self, station=None, project=None,  project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
         return ddclient.random_worker_id()
         
     @cherrypy.expose
-    def getNextFile(self, station, project, processid,  **kwargs):
+    def getNextFile(self, station=None, project=None,  project_id=None, processid,  **kwargs):
         ddclient = self.client_cache.getmc_client()
         res = ddclient.next_file(project_id=project, worker_id=processid)
         # just return the url from the first replica 
@@ -663,13 +667,13 @@ class Projects(ClientCacheMixin):
         return res["handle"]["replicas"][0]["url"]
 
     @cherrypy.expose
-    def updateFileStatus(self, station, project, processid, status,  **kwargs):
+    def updateFileStatus(self, station=None, project=None, project_id=None, processid, status,  **kwargs):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def releaseFile(self, station, project, processid, status,  **kwargs):
+    def releaseFile(self, station=None, project=None, project_id=None, processid, status,  **kwargs):
         ddclient = self.client_cache.getmc_client()
         did = self.last_file_did[f"{project}/{worker_id}"]
         del self.last_file_did[f"{project}/{worker_id}"]
@@ -681,33 +685,34 @@ class Projects(ClientCacheMixin):
         return ""
 
     @cherrypy.expose
-    def endProcess(self, station, project, processid, status,  **kwargs):
+    def endProcess(self, station=None, project=None, project_id=None processid, status,  **kwargs):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def status(self, station, project, processid, **kwargs):
+    def status(self, station=None, project=None, project_id=None, processid, **kwargs):
         ddclient = self.client_cache.getmc_client()
         pass
 
     @cherrypy.expose
-    def endProject(self, station, project, status, **kwargs):
+    def endProject(self, station=None, project=None, projet_id=None, status, **kwargs):
+        ddclient = self.client_cache.getmc_client()
+        pass
+
+    @cherrypy.expose
+    def get(self,  project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
         pass
     @cherrypy.expose
-    def get(self, **kwargs):
+    def dumpProject(self, project_id=None **kwargs):
         ddclient = self.client_cache.getmc_client()
         pass
     @cherrypy.expose
-    def dumpProject(self, **kwargs):
-        ddclient = self.client_cache.getmc_client()
+    def summary(self,  project_id=None, **kwargs):
         pass
     @cherrypy.expose
-    def summary(self, **kwargs):
-        pass
-    @cherrypy.expose
-    def recovery_dimensions(self, **kwargs):
+    def recovery_dimensions(self,  project_id=None, **kwargs):
         pass
 
 
@@ -747,36 +752,49 @@ class Api(ClientCacheMixin):
 
     @cherrypy.expose
     def createDefinition(self, **kwargs):
-        pass
+        return Definitions.create(self, **kwargs)
+
     @cherrypy.expose
     def deleteDefinition(self, **kwargs):
-        pass
+        return Definitions.delete(self, **kwargs)
+        
     @cherrypy.expose
     def describeDefinition(self, **kwargs):
-        pass
+        return Definitions.get(self, **kwargs)
+        
     @cherrypy.expose
     def translateConstraints(self, **kwargs):
-        pass
+        return Files.list(**kwargs)
+
     @cherrypy.expose
     def locateFile(self, **kwargs):
-        pass
+        return Files.get_name_locations(self, **kwargs)
+
     @cherrypy.expose
     def getMetadata(self, **kwargs):
-        pass
+        return Files.get_name_metadata(self, **kwargs)
+        
     @cherrypy.expose
     def setStatus(self, **kwargs):
         pass
     @cherrypy.expose
     def dumpStation(self, **kwargs):
-        pass
+        ddclient = self.client_cache.getdd_client()
+        rlst = list(ddclient.list_projects())
+        res = "\n".join([f"project {x['attributes'].get('name','')} id {x['project_id']} files: {len(x['files']} " for x in rlst])
 
     @cherrypy.expose
     def startProject(self, **kwargs):
         pass
 
     @cherrypy.expose
-    def findProject(self, **kwargs):
-        pass
+    def findProject(self, name=, **kwargs):
+        ddclient = self.client_cache.getdd_client()
+        pl = list(ddclient.list_projects(attributes={'name':name}))
+        p = pl[0]
+        b = cherrypy.request.base
+        s = cherrypy.request.scheme
+        return f"{s}:{b}/projects/id/{p["project_id"}/"
 
 
 def main():
