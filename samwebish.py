@@ -344,9 +344,10 @@ class Files(ClientCacheMixin):
     @cherrypy.expose
     def list(self, dims="", fileinfo="", **kwargs):
         mquery = self.convert_sam_query(dims)
+        cherrypy.log("converted {dims=} to {mquery=}")
         client = self.client_cache.getmc_client()
         res = client.query(mquery)
-        return res
+        return "\n".join([ x["name"] for x in res ])
 
     @cherrypy.expose
     def count(self, dims, **kwargs):

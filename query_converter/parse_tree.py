@@ -102,8 +102,10 @@ def render_dimensions_tree(tree):
 
 
 class NodeBase(object):
-    precedence = None
-    nodes = []  # No children by default
+    def __init__(self):
+        self.precedence = None
+        self.nodes = []  # No children by default
+        self.default_namespace = "mengel:"
 
     def __str__(self):
         return formatTree(self)
@@ -142,8 +144,10 @@ class ListNodeBase(NodeBase):
         return cls(*tokens)
 
     def __init__(self, *nodes):
+        NodeBase.__init__(self)
         self.nodes = list(nodes)
         self.negated = False
+        
 
     def __str__(self):
         return formatTree(self)
@@ -226,6 +230,7 @@ class UnaryNode(NodeBase):
     """Base class for nodes with a single child"""
 
     def __init__(self):
+        NodeBase.__init__(self)
         self.negated = False
 
     @property
@@ -444,6 +449,7 @@ class AvailabilityNode(NodeBase):
         return cls(*tokens)
 
     def __init__(self, *flags):
+        NodeBase.__init__(self)
         self.flags = list(flags)
 
     def __str__(self):
@@ -719,6 +725,7 @@ class RangeNode(NodeBase):
         return cls(*tokens)
 
     def __init__(self, first, last):
+        NodeBase.__init__(self)
         self.first, self.last = first, last
 
     def __str__(self):
@@ -745,7 +752,8 @@ class DefinitionNode(NodeBase):
         return cls(tokens[0])
 
     def __init__(self, defname):
-        self.defname = "default:" + defname.replace('-','_')
+        NodeBase.__init__(self)
+        self.defname = self.default_namespace + defname.replace('-','_')
         self.negated = False
 
     def __str__(self):
@@ -774,6 +782,7 @@ class MetaDatasetNode(NodeBase):
         return cls(tokens[0])
 
     def __init__(self, defname):
+        NodeBase.__init__(self)
         self.defname = defname
 
     def __str__(self):
@@ -801,6 +810,7 @@ class MetaFilterNode(NodeBase):
         return cls(tokens[0])
 
     def __init__(self, filter_name, filter_param_nodes, node, where_nodes):
+        NodeBase.__init__(self)
         self.filter_name = filter_name
         self.filter_param_nodes = filter_param_nodes
         self.nodes = []
@@ -1292,7 +1302,7 @@ def formatTree(tree):
     return " ".join(formatter.visit(tree))
 
 def SAM_query_to_MetaCat(dims):
-    import parser
+    import query_converter.parser as parser
     t = parser.parse_string(dims)
     #logging.debug("parse tree: ", str(t), "\n\n")
     #logging.debug("-------------------")
