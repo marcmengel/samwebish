@@ -78,6 +78,9 @@ run_expecting "samweb count-definition-files tst_q_1710508175" "4"
 run_expecting "samweb list-definition-files --summary tst_q_1788293412.8690157" "File count:" "25" "Total size:" "906"
 run_expecting "samweb list-files defname:gen_cfg" "c.fcl" "d.fcl"
 run_expecting "samweb list-files --summary defname:gen_cfg" "File count:" "5" "Total size:" "100"
+run_expecting "samweb get-metadata b.fcl" "file_size:" "20"
+run_expecting "samweb get-metadata --json b.fcl" '"file_size":' "20" "{" 
+
 
 echo
 

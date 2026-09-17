@@ -399,8 +399,8 @@ class Files(ClientCacheMixin):
         if "add" in kwargs:
             samloc = kwargs["add"]
             rse, path = samloc.split(":",1)
-            metadata = mcclient.get_file(name=file, namespace=self.default_ns, with_metadata = True)
-            rclient.add_replica( rse, self.default_ns, file, metadata["size"], metadata["checksums"]["adler32"] )
+            metadata = mcclient.get_file(name=file, namespace=self.namespace, with_metadata = True)
+            rclient.add_replica( rse, self.namespace, file, metadata["size"], metadata["checksums"]["adler32"] )
         if "remove" in kwargs:
             samloc = kwargs["remove"]
             rse, path = samloc.split(":",1)
@@ -409,26 +409,30 @@ class Files(ClientCacheMixin):
         return "ok"
 
     @cherrypy.expose
-    def get_name_metadata(self, name=None, **kwargs):
+    def get_name_metadata(self, name=None, format="plain", **kwargs):
         mcclient = self.client_cache.getmc_client()
-        metadata = mcclient.get_file(name=file, namespace=self.default_ns, with_metadata = True)
+        metadata = mcclient.get_file(name=name, namespace=self.namespace, with_metadata = True)
         converted_metadata = self.mcc.convert_all_mc_sam(metadata)
-        return converted_metadata
+        if format == "json":
+            return json.dumps(converted_metadata)
+        else:
+            return "\n".join([f"{k:>20}:\t{v}" for k,v in converted_metadata.items()])
+              
 
     def traverse_linage( self, mcclient, name, ltype, raw = False ):
-        data = mcclient.get_file(name=name, namespace=self.default_ns,with_provenance=True)
+        data = mcclient.get_file(name=name, namespace=self.namespace,with_provenance=True)
         res1 = data[ltype]
         res = []
         if raw:
             if len(res1) == 0:
-                res.append( f"{self.default_ns}:{name}" )
+                res.append( f"{self.namespace}:{name}" )
         else:
             res.extend(res1)
         for fid in res1:
             cname = res1.split(":")[1]
             nextgen = self.traverse_lineage( mcclient, cname, ltype, raw)
             if raw and len(nextgen == 0):
-                res.append( f"{self.default_ns}:{cname}")
+                res.append( f"{self.namespace}:{cname}")
             else:
                 res.extend( nextgen )
         return res
@@ -437,7 +441,7 @@ class Files(ClientCacheMixin):
     def lineage(self, name, ltype, format="plain", **kwargs):
         # ltype is: parents, children, rawancestors
         mcclient = self.client_cache.getmc_client()
-        data = mcclient.get_file(name=file, namespace=self.default_ns,with_provenance=True)
+        data = mcclient.get_file(name=file, namespace=self.namespace,with_provenance=True)
         if ltype in {"parents", "children"}:
             res = data[ltype]
         if ltype == "ancestors":
