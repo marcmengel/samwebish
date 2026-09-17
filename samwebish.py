@@ -9,6 +9,7 @@ import traceback
 
 from data_dispatcher.api import DataDispatcherClient
 from metacat.webapi import MetaCatClient
+from metacat.webapi.webapi import AlreadyExistsError, InvalidMetadataError
 from rucio.client import Client as RClient
 from rucio.client.replicaclient import ReplicaClient
 from query_converter.parse_tree import SAM_query_to_MetaCat
@@ -194,6 +195,7 @@ class ClientCacheMixin():
         #self.namespace = "sam"
         # for testing:
         self.namespace = "mengel"
+        self.default_dataset = "mengel:all"
         self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT",""))
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -313,11 +315,20 @@ Definition Name: {defname}
 class Files(ClientCacheMixin):
     """ dispatcher and methods for /api/files paths """
 
+    @cherrypy.expose
+    def index(self, **kwargs):
+        cherrypy.log(f"Files:index() {cherrypy.request.method=}")
+        if  cherrypy.request.method == "POST":
+            return self.post(**kwargs)
+        raise cherrypy.HTTPError(404, 'Location not found')
+
     def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb files api """
-        cherrypy.log(f"Files:_cp_dispatch: {vpath=}")
+        cherrypy.log(f"Files:_cp_dispatch: {vpath=} {cherrypy.request.method=}")
         if len(vpath) == 0:
+            cherrypy.log(f"Files: handling {cherrypy.request.method}")
             vpath.insert(0, cherrypy.request.method.lower())
+            return self
         if len(vpath) == 1:
             # simple method like create
             return self
@@ -329,6 +340,7 @@ class Files(ClientCacheMixin):
             cherrypy.request.params['name'] = vpath.pop(0)
             vpath.insert(0, f"{cherrypy.request.method.lower()}_{comp}_{vpath.pop(0)}")
             return self
+
         if len(vpath) == 4:
             # /name/fname/lineage/type
             vpath.pop(0)  # /name/
@@ -344,7 +356,7 @@ class Files(ClientCacheMixin):
     @cherrypy.expose
     def list(self, dims="", fileinfo="", **kwargs):
         mquery = self.convert_sam_query(dims)
-        cherrypy.log("converted {dims=} to {mquery=}")
+        cherrypy.log(f"list: converted {dims=} to {mquery=}")
         client = self.client_cache.getmc_client()
         res = client.query(mquery)
         return "\n".join([ x["name"] for x in res ])
@@ -459,10 +471,19 @@ class Files(ClientCacheMixin):
     @cherrypy.expose
     def post(self, **kwargs):
         """ declare a file... """
-        metadata = _decodeJSONBody()
+        metadata_text = cherrypy.request.body.read()
+        metadata = json.loads(metadata_text)
         mcclient = self.client_cache.getmc_client()
-        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
-        mcclient.declare_files(self.default_dataset, [ mc_metadata ], self.namespace)
+        try:
+            mc_metadata = self.mcc.convert_all_sam_mc(metadata,namespace=self.namespace)
+            mcclient.declare_files(self.default_dataset, [ mc_metadata ], self.namespace)
+        except AlreadyExistsError as e:
+            raise cherrypy.HTTPError(409, 'File already exists')
+        except InvalidMetadataError as e:
+            raise cherrypy.HTTPError(400, f'Invalid metadata: {e}')
+       
+            
+        cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
@@ -564,7 +585,7 @@ class Values(ClientCacheMixin):
     @cherrypy.expose
     def get_parameters(self, **kwargs):
         mcclient = self.client_cache.getmc_client()
-        keylist = mcclient.report_metadata_keys()
+        keylist = list(mcclient.report_metadata_keys())
         return "\n".join(keylist)
 
     @cherrypy.expose
@@ -704,14 +725,15 @@ class Api(ClientCacheMixin):
 
     def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb api """
-        cherrypy.log(f"Api:_cp_dispatch: {vpath=}")
+        cherrypy.log(f"Api:_cp_dispatch: {vpath=} {cherrypy.request.method=}")
         if len(vpath) == 0:
             vpath.insert(0, 'index')
             return self
         if vpath[0] in self.parts:
-            cherrypy.log(f"Api:_cp_dispatch: handing off to {vpath[0]}..")
-            # for things in our parts array, hand off
-            return self.parts[vpath.pop(0)]
+            dest = vpath.pop(0)
+            cherrypy.log(f"Api:_cp_dispatch: handing off to {dest} -> {self.parts[dest]}..")
+
+            return self.parts[dest]
         if len(vpath) == 3:
             vpath.pop(0)
             cherrypy.request.params['projectname'] = vpath.pop(0)
@@ -765,9 +787,10 @@ def main():
         'server.ssl_module':'pyopenssl',
         'server.ssl_certificate':'./certs/server_cert.pem',
         'server.ssl_private_key':'./certs/server_key.pem',
+        
     }
     cherrypy.config.update(server_config)
-    cherrypy.tree.mount(Api(), '/api')
+    cherrypy.tree.mount(Api(), '/api', {'/': {'tools.trailing_slash.missing': False}})
 
     cherrypy.engine.start()
     cherrypy.engine.block()
