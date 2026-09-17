@@ -220,15 +220,19 @@ class Definitions(ClientCacheMixin):
             cherrypy.request.params['defname'] = vpath.pop(0)
             return self
         if len(vpath) == 4:
+            cherrypy.log(f"Definitions: _cp_dispatch: length 4")
             # /name/defname/files/method
             vpath.pop(0)  # /name/
             cherrypy.request.params['defname'] = vpath.pop(0)
-            vpath.pop(0) # /files/
+            a = vpath.pop(0) # /files/
+            b = vpath.pop(0)
+            method =  f"{a}_{b}"
+            cherrypy.log(f"Definitions: {method=}")
+            vpath.insert(0, method)
             return self
 
     @cherrypy.expose
     def list(self, defname="", user="", group="", after="", before="", format=""):
-        cherrypy.log("entering Definitions:list")
         client = self.client_cache.getmc_client()
         if not defname:
             defname = "*"
@@ -249,6 +253,7 @@ class Definitions(ClientCacheMixin):
         cherrypy.log(f"got back {dlist=}")
         return "\n".join([ x["name"] for x in dlist ])
                     
+
     @cherrypy.expose
     def create(self, defname, dims, user):
         client = self.client_cache.getmc_client()
@@ -285,8 +290,17 @@ Definition Name: {defname}
     def summary(self, defname):
         client = self.client_cache.getmc_client()
         res = list(client.query(f"files selected by {self.namespace}:{defname}" , summary="count"))[0]
-        cherrypy.log(f"got {res=}")
         return res
+
+    @cherrypy.expose
+    def files_list(self, defname="", format=""):
+        client = self.client_cache.getmc_client()
+        res = list(client.query(f"files selected by {self.namespace}:{defname}"))
+        cherrypy.log(f"{res=}")
+        if format == "json":
+            return json.dumps(res)
+        else:
+            return "\n".join([e['name'] for e in res])
 
 class Files(ClientCacheMixin):
     """ dispatcher and methods for /api/files paths """
