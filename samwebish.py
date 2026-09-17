@@ -351,14 +351,22 @@ class Files(ClientCacheMixin):
 
     @cherrypy.expose
     def count(self, dims, **kwargs):
-        return self.summary(dims)["count"]
+        return self._summary(dims)["count"]
+
+    def _summary(self, dims, **kwargs):
+        mquery = self.convert_sam_query(dims)
+        client = self.client_cache.getmc_client()
+        res = list(client.query(mquery, summary="count"))[0]
+        return res
 
     @cherrypy.expose
     def summary(self, dims, **kwargs):
-        mquery = self.convert_sam_query(dims)
-        client = self.client_cache.getmc_client()
-        res = client.query(mquery, summary="count")
-        return res
+        sdict = self._summary(dims)
+        sdict['file_count'] = sdict['count']
+        sdict['total_file_size'] = sdict['total_size']
+        sdict['total_event_count'] = 0
+        cherrypy.log(f"{sdict=}")
+        return json.dumps(sdict)
 
     @cherrypy.expose
     def get_name_locations(self, name="", **kwargs):
