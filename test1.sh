@@ -45,6 +45,7 @@ run_expecting "samweb locate-file a.fcl" "FNAL_DCACHE_DISK_TEST" "/pnfs/fnal.gov
 run_expecting "samweb list-definitions" "tst_q_1710507530" "tst_q_1710508175"
 run_expecting "samweb describe-definition tst_q_1710508175" "Definition Name: tst_q_1710508175" "Dimensions: files from mengel:tst1710508175"
 run_expecting "samweb count-definition-files tst_q_1710508175" "4"
+run_expecting "samweb list-definition-files --summary tst_q_1788293412.8690157" "File count:" "25" "Total size:" "906"
 
 
 

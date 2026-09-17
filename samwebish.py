@@ -281,16 +281,24 @@ Definition Name: {defname}
         return res
 
     @cherrypy.expose
-    def count(self, defname):
+    def files_count(self, defname):
         sdict = self.summary(defname)
         cherrypy.log(f"got {sdict=} {sdict['count']}")
         return str(sdict['count'])
 
-    @cherrypy.expose
     def summary(self, defname):
         client = self.client_cache.getmc_client()
         res = list(client.query(f"files selected by {self.namespace}:{defname}" , summary="count"))[0]
         return res
+
+    @cherrypy.expose
+    def files_summary(self, defname):
+        sdict = self.summary(defname)
+        sdict['file_count'] = sdict['count']
+        sdict['total_file_size'] = sdict['total_size']
+        sdict['total_event_count'] = 0
+        cherrypy.log(f"{sdict=}")
+        return json.dumps(sdict)
 
     @cherrypy.expose
     def files_list(self, defname="", format=""):
