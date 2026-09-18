@@ -63,7 +63,7 @@ run_expecting()  {
    cmd="$1"
    shift
    fc=0
-   out=$($cmd 2>&1)
+   out=$(eval "$cmd" 2>&1)
    ec=$?
 
    if $expect_fail && [ $ec = 0 ]
@@ -93,6 +93,15 @@ run_expecting()  {
    return $ec
 }
 
+make_new_file_metadata() {
+    ds=$(date "+%Y%m%d%H%M%S")
+    sed -e "s/@DATESTAMP@/$ds/" \
+       < testdata/md_new_file_template.json \
+       > testdata/md_new_file.json
+}
+
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
 verbose_check "$@"
 
 start_server
@@ -107,17 +116,12 @@ run_expecting "samweb list-files --summary defname:gen_cfg" "File count:" "5" "T
 run_expecting "samweb get-metadata b.fcl" "file_size:" "20"
 run_expecting "samweb get-metadata --json b.fcl" '"file_size":' "20" "{" 
 
-
-ds=$(date "+%Y%m%d%H%M%S")
-sed -e "s/@DATESTAMP@/$ds/" \
-   < testdata/md_new_file_template.json \
-   > testdata/md_new_file.json
-
+make_new_file_metadata
 run_expecting "samweb declare-file testdata/md_new_file.json" 
+
 run_expecting -f "samweb declare-file testdata/md_file_exists.json" "already exists"
 run_expecting -f "samweb declare-file testdata/md_bad_checksum.json"  "checksum md5: value is wrong length" 
+run_expecting "samweb run-project --user=mengel --defname=gen_cfg 'echo doing %fileurl...'" "Started project" "Started consumer processs ID" "doing" "a.fcl" "d.fcl" "Stopped project"
 
 echo
-
-
 
