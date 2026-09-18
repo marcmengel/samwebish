@@ -623,6 +623,7 @@ class Projects(ClientCacheMixin):
     def __init__(self):
         ClientCacheMixin.__init__(self)
         self.last_process_file = {}
+        self.project_finished = {}
 
     def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb projects api """
@@ -673,6 +674,7 @@ class Projects(ClientCacheMixin):
             self.last_process_file[process_id] = name
             return rdict["url"]
         else:
+            self.project_finished[project_id] = True
             cherrypy.response.status = 204
             return ""
 
@@ -717,8 +719,10 @@ class Projects(ClientCacheMixin):
 
     @cherrypy.expose
     def endProject(self,  project_id=None, **kwargs):
-        ddclient = self.client_cache.getdd_client()
-        ddclient.cancel_project(project_id)
+        """ if we haven't seen a getNextFile return nothing, cancel it """
+        if project_id not in self.project_finished:
+            ddclient = self.client_cache.getdd_client()
+            ddclient.cancel_project(project_id)
         cherrypy.response.status = 204
         return ""
         
