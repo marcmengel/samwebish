@@ -54,7 +54,6 @@ class ClientCache:
         self.subj_user_re = re.compile("(.*)@fnal.gov")
         self.scope_user_re = re.compile("storage[^ ]*/users/([^ ]*)")
         self.token_offset = len("Bearer ")
-        self.last_file_did = {}
 
     def get_scitoken(self):
         """ extract scitoken from Authorization: header """
@@ -191,6 +190,7 @@ class ClientCache:
 client_cache = ClientCache()
 
 class ClientCacheMixin():
+
     def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
         #self.namespace = "sam"
@@ -198,6 +198,7 @@ class ClientCacheMixin():
         self.namespace = "mengel"
         self.default_dataset = "mengel:all"
         self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT",""))
+        self.last_file_did = {}
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for dispatching/handling web calls via CherryPy
@@ -619,8 +620,13 @@ class Values(ClientCacheMixin):
 class Projects(ClientCacheMixin):
     """ dispatcher and methods for /api/project paths """
 
+    def __init__(self):
+        ClientCacheMixin.__init__(self)
+
     def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb projects api """
+
+        cherrypy.log(f"Projects:_cp_dispatch {vpath=}")
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
             
@@ -633,88 +639,88 @@ class Projects(ClientCacheMixin):
         if len(vpath) == 3:
             # id/project_id/method
             assert(vpath[0] == 'id')
-            vpath.pop()
+            vpath.pop(0)
             cherrypy.request.params['project_id'] = vpath.pop(0)
             return self
         if len(vpath) == 5:
-            # id/project_id/processes/<processid>/method
+            # id/project_id/processes/<process_id>/method
             assert(vpath[0] == 'id')
-            vpath.pop()
+            vpath.pop(0)
             cherrypy.request.params['project_id'] = vpath.pop(0)
-            vpath.pop()
-            cherrypy.request.params['processid'] = vpath.pop(0)
-
-    def lookup_project(self, ddclient, project):
-        pl = list(ddclient.list_projects(attributes={'name':project}))
-        return pl[0].get("project_id", None)
+            vpath.pop(0)
+            cherrypy.request.params['process_id'] = vpath.pop(0)
+            cherrypy.log(f"len 5: {vpath=}")
+            return self
 
 
     @cherrypy.expose
     def establishProcess(self,   project_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
-        return ddclient.random_worker_id()
+        ddclient = self.client_cache.getdd_client()
+        cherrypy.log("establishProcess...")
+        return ddclient.new_worker_id()
         
     @cherrypy.expose
-    def getNextFile(self,   project_id=None, processid=None,  **kwargs):
-        ddclient = self.client_cache.getmc_client()
-        if project and not project_id:
-            project_id = self.lookup_project(ddclient, project)
-        res = ddclient.next_file(project_id=project_id, worker_id=processid)
+    def getNextFile(self,   project_id=None, process_id=None,  **kwargs):
+        ddclient = self.client_cache.getdd_client()
+        res = ddclient.next_file(project_id=project_id, worker_id=process_id)
         # just return the url from the first replica 
-        name = res["handle"]["replicas"][0]["name"]
-        namespace = res["handle"]["replicas"][0]["namespace"]
-        if  f"{namespace}:{name}" in self.last_file_did:
-            raise ReleaseFileFirst()
-        self.last_file_did[f"{project}/{worker_id}"] = f"{namespace}:{name}"
-        return res["handle"]["replicas"][0]["url"]
+        cherrypy.log(f"next_file gives: {res=}")
+        if res:
+            rname, rdict = list(res['replicas'].items())[0]
+            name = res["name"]
+            namespace = res["namespace"]
+            if f"{project_id}/{process_id}" in self.last_file_did:
+                raise ReleaseFileFirst()
+            self.last_file_did[f"{project_id}/{process_id}"] = f"{namespace}:{name}"
+            return rdict["url"]
+        else:
+            return ""
 
+     
     @cherrypy.expose
-    def updateFileStatus(self, processid, status,   project_id=None, **kwargs):
+    def updateFileStatus(self, process_id, status,   project_id=None, **kwargs):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def releaseFile(self, processid, status,   project_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
-        if project and not project_id:
-            project_id = self.lookup_project(ddclient, project)
-        did = self.last_file_did[f"{project}/{worker_id}"]
-        del self.last_file_did[f"{project}/{worker_id}"]
+    def releaseFile(self, process_id, status,   project_id=None, **kwargs):
+        ddclient = self.client_cache.getdd_client()
+        did = self.last_file_did[f"{project_id}/{process_id}"]
+        del self.last_file_did[f"{project_id}/{process_id}"]
         if status == 'ok':
-            ddclient.file_done(project, did, processid)
+            ddclient.file_done(project, did, process_id)
         else:
-            ddclient.file_failed(project, did, processid)
+            ddclient.file_failed(project, did, process_id)
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def endProcess(self, processid, status,   project_id=None, **kwargs):
+    def endProcess(self, process_id, status,   project_id=None, **kwargs):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
     def endProject(self, status,  projet_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
         pass
 
     # same function for project or process status
     @cherrypy.expose
-    def status(self, processid=None,  project_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
+    def status(self, process_id=None,  project_id=None, **kwargs):
+        ddclient = self.client_cache.getdd_client()
         proj = ddclient.get_project(project_id)
-        if processid:
+        if process_id:
              for h in proj['file_handles']:
-                 if h['processid'] == processid:
+                 if h['process_id'] == process_id:
                       process = h
              return process['state'] if process else ""
         else:
-            return proj['state'] if proj else else ""
+            return proj['state'] if proj else ""
 
     @cherrypy.expose
     def get(self,  project_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
+        ddclient = self.client_cache.getdd_client()
         return json.dumps(ddclient.get_project(project_id))
 
     @cherrypy.expose
@@ -732,7 +738,7 @@ class Projects(ClientCacheMixin):
     @cherrypy.expose
     def recovery_dimensions(self,  project_id=None, **kwargs):
         proj = json.dumps(ddclient.get_project(project_id))
-        return "project {d["attributes"]["name"]} minus project_status like 'com%'"
+        return "project {d['attributes']['name']} minus project_status like 'com%'"
 
 class Api(ClientCacheMixin):
     """ dispatcher and methods for /api/ paths """
@@ -806,18 +812,31 @@ class Api(ClientCacheMixin):
         return res
 
     @cherrypy.expose
-    def startProject(self, **kwargs):
-        pass
-
+    def startProject(self, name, station, username, defname=None, def_id=None, snapshot_id=None, group=None, **kwargs):
+        ddclient = self.client_cache.getdd_client()
+        mcclient = self.client_cache.getmc_client()
+        if defname:
+            q = f"files selected by {self.namespace}:{defname}"
+        if def_id:
+            q = f"files selected by {self.namespace}:{def_id}"
+        if snapshot_id:
+            q = f"files from {self.namespace}:snapshot_{snapshot_id}"
+        files = list(mcclient.query( q ))
+        sid = f"{self.namespace}:snapshot_for_project_{name}"
+        cherrypy.log(f"startProject: {q=} {sid=} {files=}")
+        ds = mcclient.create_dataset( sid )
+        mcclient.add_files( sid, files )
+        p = ddclient.create_project(files, project_attributes={'name': name}, query=q )
+        b = cherrypy.request.base
+        return f"{b}/api/projects/id/{p['project_id']}"
+        
     @cherrypy.expose
     def findProject(self, name, **kwargs):
         ddclient = self.client_cache.getdd_client()
         pl = list(ddclient.list_projects(attributes={'name':name}))
         p = pl[0]
         b = cherrypy.request.base
-        s = cherrypy.request.scheme
-        return f"{s}:{b}/projects/id/{p['project_id']}/"
-
+        return f"{b}/api/projects/id/{p['project_id']}"
 
 def main():
     server_config={
