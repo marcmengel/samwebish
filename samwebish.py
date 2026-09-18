@@ -3,6 +3,7 @@ import base64
 import cherrypy
 import json
 import os
+import os.path
 import re
 import time
 import traceback
@@ -10,7 +11,7 @@ import traceback
 from version import samwebish_version
 from data_dispatcher.api import DataDispatcherClient
 from metacat.webapi import MetaCatClient
-from metacat.webapi.webapi import AlreadyExistsError, InvalidMetadataError
+from metacat.webapi.webapi import AlreadyExistsError, InvalidMetadataError, BadRequestError
 from rucio.client import Client as RClient
 from rucio.client.replicaclient import ReplicaClient
 from query_converter.parse_tree import SAM_query_to_MetaCat
@@ -198,7 +199,6 @@ class ClientCacheMixin():
         self.namespace = "mengel"
         self.default_dataset = "mengel:all"
         self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT",""))
-        self.last_file_did = {}
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for dispatching/handling web calls via CherryPy
@@ -622,6 +622,7 @@ class Projects(ClientCacheMixin):
 
     def __init__(self):
         ClientCacheMixin.__init__(self)
+        self.last_process_file = {}
 
     def _cp_dispatch(self, vpath):
         """ handle various REST-ish parsing of samweb projects api """
@@ -669,29 +670,42 @@ class Projects(ClientCacheMixin):
             rname, rdict = list(res['replicas'].items())[0]
             name = res["name"]
             namespace = res["namespace"]
-            if f"{project_id}/{process_id}" in self.last_file_did:
-                raise ReleaseFileFirst()
-            self.last_file_did[f"{project_id}/{process_id}"] = f"{namespace}:{name}"
+            self.last_process_file[process_id] = name
             return rdict["url"]
         else:
+            cherrypy.response.status = 204
             return ""
 
      
     @cherrypy.expose
-    def updateFileStatus(self, process_id, status,   project_id=None, **kwargs):
-        # don't need to do this...
+    def updateFileStatus(self, process_id, status='consumed', filename=None,  project_id=None, **kwargs):
+        cherrypy.log(f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}")
+        if cherrypy.request.method == "POST":
+            data = cherrypy.request.body.read()
+            cherrypy.log(f"updateFileStatus: {data=}")
+        if status == 'consumed':
+            return self.releaseFile(process_id, 'ok', project_id=project_id, filename=filename)
+        if status == 'skipped':
+            return self.releaseFile(process_id, 'bad', project_id=project_id, filename=filename)
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def releaseFile(self, process_id, status,   project_id=None, **kwargs):
+    def releaseFile(self, process_id, status,   project_id=None, filename=None,  **kwargs):
+        cherrypy.log(f"releaseFile: {process_id=} {status=} {filename=} {project_id=}")
+        if not filename and self.last_process_file.get(process_id,""):
+            filename = self.last_process_file[process_id]
+            del self.last_process_file[process_id]
+        if not filename:
+            cherrypy.response.status = 204
+            return ""
         ddclient = self.client_cache.getdd_client()
-        did = self.last_file_did[f"{project_id}/{process_id}"]
-        del self.last_file_did[f"{project_id}/{process_id}"]
+        filename = os.path.basename(filename)
+        did = f"{self.namespace}:{filename}"
         if status == 'ok':
-            ddclient.file_done(project, did, process_id)
+            ddclient.file_done(project_id, did, process_id)
         else:
-            ddclient.file_failed(project, did, process_id)
+            ddclient.file_failed(project_id, did, process_id)
         cherrypy.response.status = 204
         return ""
 
@@ -702,21 +716,18 @@ class Projects(ClientCacheMixin):
         return ""
 
     @cherrypy.expose
-    def endProject(self, status,  projet_id=None, **kwargs):
-        pass
+    def endProject(self,  project_id=None, **kwargs):
+        ddclient = self.client_cache.getdd_client()
+        ddclient.cancel_project(project_id)
+        cherrypy.response.status = 204
+        return ""
+        
 
-    # same function for project or process status
+    # same function for project or process status, which is a put
+    # we ignore..
     @cherrypy.expose
     def status(self, process_id=None,  project_id=None, **kwargs):
-        ddclient = self.client_cache.getdd_client()
-        proj = ddclient.get_project(project_id)
-        if process_id:
-             for h in proj['file_handles']:
-                 if h['process_id'] == process_id:
-                      process = h
-             return process['state'] if process else ""
-        else:
-            return proj['state'] if proj else ""
+        pass
 
     @cherrypy.expose
     def get(self,  project_id=None, **kwargs):
@@ -805,7 +816,7 @@ class Api(ClientCacheMixin):
     @cherrypy.expose
     def dumpStation(self, **kwargs):
         ddclient = self.client_cache.getdd_client()
-        rlst = list(ddclient.list_projects(state=None))
+        rlst = list(ddclient.list_projects())
         cherrypy.log(f"dumpStation: got {rlst=}")
         res = f"samwebish version {samwebish_version}\n{len(rlst)} active projects:\n"
         res += "\n".join([f"project {x['attributes'].get('name','')} id {x['project_id']} owner: {x['owner']} state: {x['state']} files: {len(x['file_handles'])} " for x in rlst])
@@ -821,7 +832,10 @@ class Api(ClientCacheMixin):
             q = f"files selected by {self.namespace}:{def_id}"
         if snapshot_id:
             q = f"files from {self.namespace}:snapshot_{snapshot_id}"
-        files = list(mcclient.query( q ))
+        try:
+            files = list(mcclient.query( q ))
+        except BadRequestError:
+            raise cherrypy.HTTPError(404, f'Defname {defname} not found')
         sid = f"{self.namespace}:snapshot_for_project_{name}"
         cherrypy.log(f"startProject: {q=} {sid=} {files=}")
         ds = mcclient.create_dataset( sid )
