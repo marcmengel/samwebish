@@ -7,6 +7,7 @@ import re
 import time
 import traceback
 
+from version import samwebish_version
 from data_dispatcher.api import DataDispatcherClient
 from metacat.webapi import MetaCatClient
 from metacat.webapi.webapi import AlreadyExistsError, InvalidMetadataError
@@ -104,7 +105,7 @@ class ClientCache:
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
-            self.ddccache[scitok] = DataDispatcherClient(token_file="/dev/null")
+            self.ddccache[scitok] = DataDispatcherClient()
             try:
                 self.ddccache[scitok].login_token(username, scitok)
             except:
@@ -643,21 +644,22 @@ class Projects(ClientCacheMixin):
             vpath.pop()
             cherrypy.request.params['processid'] = vpath.pop(0)
 
-    @cherrypy.expose
-    def status(self, station=None, project=None, project_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
-        res = ddclient.get_project(project)
-        return res['state']
+    def lookup_project(self, ddclient, project):
+        pl = list(ddclient.list_projects(attributes={'name':project}))
+        return pl[0].get("project_id", None)
+
 
     @cherrypy.expose
-    def establishProcess(self, station=None, project=None,  project_id=None, **kwargs):
+    def establishProcess(self,   project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
         return ddclient.random_worker_id()
         
     @cherrypy.expose
-    def getNextFile(self, station=None, project=None,  project_id=None, processid,  **kwargs):
+    def getNextFile(self,   project_id=None, processid=None,  **kwargs):
         ddclient = self.client_cache.getmc_client()
-        res = ddclient.next_file(project_id=project, worker_id=processid)
+        if project and not project_id:
+            project_id = self.lookup_project(ddclient, project)
+        res = ddclient.next_file(project_id=project_id, worker_id=processid)
         # just return the url from the first replica 
         name = res["handle"]["replicas"][0]["name"]
         namespace = res["handle"]["replicas"][0]["namespace"]
@@ -667,14 +669,16 @@ class Projects(ClientCacheMixin):
         return res["handle"]["replicas"][0]["url"]
 
     @cherrypy.expose
-    def updateFileStatus(self, station=None, project=None, project_id=None, processid, status,  **kwargs):
+    def updateFileStatus(self, processid, status,   project_id=None, **kwargs):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def releaseFile(self, station=None, project=None, project_id=None, processid, status,  **kwargs):
+    def releaseFile(self, processid, status,   project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
+        if project and not project_id:
+            project_id = self.lookup_project(ddclient, project)
         did = self.last_file_did[f"{project}/{worker_id}"]
         del self.last_file_did[f"{project}/{worker_id}"]
         if status == 'ok':
@@ -685,41 +689,56 @@ class Projects(ClientCacheMixin):
         return ""
 
     @cherrypy.expose
-    def endProcess(self, station=None, project=None, project_id=None processid, status,  **kwargs):
+    def endProcess(self, processid, status,   project_id=None, **kwargs):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def status(self, station=None, project=None, project_id=None, processid, **kwargs):
+    def endProject(self, status,  projet_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
         pass
 
+    # same function for project or process status
     @cherrypy.expose
-    def endProject(self, station=None, project=None, projet_id=None, status, **kwargs):
+    def status(self, processid=None,  project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
-        pass
+        proj = ddclient.get_project(project_id)
+        if processid:
+             for h in proj['file_handles']:
+                 if h['processid'] == processid:
+                      process = h
+             return process['state'] if process else ""
+        else:
+            return proj['state'] if proj else else ""
 
     @cherrypy.expose
     def get(self,  project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
-        pass
+        return json.dumps(ddclient.get_project(project_id))
+
     @cherrypy.expose
-    def dumpProject(self, project_id=None **kwargs):
+    def dumpProject(self, project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
-        pass
+        return json.dumps(ddclient.get_project(project_id))
+
     @cherrypy.expose
     def summary(self,  project_id=None, **kwargs):
-        pass
+        ddclient = self.client_cache.getmc_client()
+        proj = json.dumps(ddclient.get_project(project_id))
+        #  xxx mimic sam Project summary?
+        return json.dumps(ddclient.get_project(project_id))
+
     @cherrypy.expose
     def recovery_dimensions(self,  project_id=None, **kwargs):
-        pass
-
+        proj = json.dumps(ddclient.get_project(project_id))
+        return "project {d["attributes"]["name"]} minus project_status like 'com%'"
 
 class Api(ClientCacheMixin):
     """ dispatcher and methods for /api/ paths """
 
     def __init__(self):
+        ClientCacheMixin.__init__(self)
         self.parts = {
             "definitions": Definitions(),
             "files": Files(),
@@ -748,7 +767,7 @@ class Api(ClientCacheMixin):
     @cherrypy.expose
     def index(self, **kwargs):
         cherrypy.log("test message")
-        return '{"app":"samwebish", "version":0.0}'
+        return '{"app":"samwebish", "version": samwebish_version}'
 
     @cherrypy.expose
     def createDefinition(self, **kwargs):
@@ -780,21 +799,24 @@ class Api(ClientCacheMixin):
     @cherrypy.expose
     def dumpStation(self, **kwargs):
         ddclient = self.client_cache.getdd_client()
-        rlst = list(ddclient.list_projects())
-        res = "\n".join([f"project {x['attributes'].get('name','')} id {x['project_id']} files: {len(x['files']} " for x in rlst])
+        rlst = list(ddclient.list_projects(state=None))
+        cherrypy.log(f"dumpStation: got {rlst=}")
+        res = f"samwebish version {samwebish_version}\n{len(rlst)} active projects:\n"
+        res += "\n".join([f"project {x['attributes'].get('name','')} id {x['project_id']} owner: {x['owner']} state: {x['state']} files: {len(x['file_handles'])} " for x in rlst])
+        return res
 
     @cherrypy.expose
     def startProject(self, **kwargs):
         pass
 
     @cherrypy.expose
-    def findProject(self, name=, **kwargs):
+    def findProject(self, name, **kwargs):
         ddclient = self.client_cache.getdd_client()
         pl = list(ddclient.list_projects(attributes={'name':name}))
         p = pl[0]
         b = cherrypy.request.base
         s = cherrypy.request.scheme
-        return f"{s}:{b}/projects/id/{p["project_id"}/"
+        return f"{s}:{b}/projects/id/{p['project_id']}/"
 
 
 def main():
