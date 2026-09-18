@@ -39,12 +39,14 @@ succeeded() {
    fi
 }
 
+fail_list=""
 failed() {
    if $verbose
    then
        echo "Failed: $*"
    else
        printf "F"
+       fail_list="${fail_list}\nFailed $*"
    fi
 }
 
@@ -74,7 +76,7 @@ run_expecting()  {
    if $expect_success && [ $ec != 0 ]
    then
        failed "$cmd exitcode $ec"
-       return
+       return 1
    fi
    for pat in "$@"
    do
@@ -123,5 +125,6 @@ run_expecting -f "samweb declare-file testdata/md_file_exists.json" "already exi
 run_expecting -f "samweb declare-file testdata/md_bad_checksum.json"  "checksum md5: value is wrong length" 
 run_expecting "samweb run-project --user=mengel --defname=gen_cfg 'echo doing %fileurl...'" "Started project" "Started consumer processs ID" "doing" "a.fcl" "d.fcl" "Stopped project"
 
+printf "$fail_list"
 echo
 
