@@ -23,8 +23,6 @@ def is_set_level_node( tree ):
 def meta_render_dimensions_tree(tree):
     """Pretty print the dimensions tree"""
     lines = []
-    # XXX this needs fixing later... should depend if we have a set node, etc.
-    # should really put in a files where on transition from set node to a non-set node.
     line = []
     linelen = 0
     if not is_set_level_node(tree):
@@ -798,7 +796,7 @@ class MetaDatasetNode(NodeBase):
 
     def meta_render(self):
         yield "files from"
-        yield "default:snapshot_"+str(self.defname)
+        yield self.default_namespace + "snapshot_" + str(self.defname)
 
     def render(self):
         yield "snapshot_id"
@@ -942,8 +940,9 @@ class ParseTreeVisitor(object):
         return meth(node)
 
     def generic_visit(self, node):
-        for c in node.nodes:
-            self.visit(c)
+        if hasattr(node,'nodes'):
+            for c in node.nodes:
+                self.visit(c)
 
 
 class ParseTreeTransformer(ParseTreeVisitor):
@@ -955,7 +954,7 @@ class ParseTreeTransformer(ParseTreeVisitor):
         self.modified = False
 
     def generic_visit(self, node):
-        if node and node.nodes:
+        if node and hasattr(node,'nodes') and node.nodes:
             newnodes = [self.visit(c) for c in node.nodes]
             if newnodes:
                 node.nodes = [c for c in newnodes if c is not None]
@@ -1137,9 +1136,19 @@ class MetaCatTransformer(ParseTreeTransformer):
         #if self.allsets():
         #   return node
         if node.dim in self.projname_dims:
+            # two parter:
+            # 1) save term for argument to data_dispatcher filter
+            # 2) have as base files from snapshot for the project
             self.modified = True
             self.proj_id_term = node
-            return None
+            node2 = DimNode(node.dim, "=", "for_project_" + node.value)
+            if self.parent_sets():
+                logging.debug(f"snapshot dim rendered here: {repr(node2)}")
+                return MetaDatasetNode(node2.value)
+            else:
+                logging.debug(f"snapshot dim pushed up: {repr(node)}")
+                self.snapshot_terms.append(node2)
+                return None
         if node.dim in self.proj_dims:
             self.modified = True
             self.proj_terms.append(node)
