@@ -66,8 +66,9 @@ class ClientCache:
 
     def cheap_decode_token(self, scitok):
         """ extract json data from jwt token without validating, etc. """
+        
         tp = scitok.split(".")
-        return json.loads(base64.b64decode(tp[1]+'=='))
+        return json.loads(base64.b64decode(tp[1]+'==', altchars='_-'))
 
     def get_username(self, scitok):
         """ get username from scitoken """
@@ -859,7 +860,7 @@ class Api(ClientCacheMixin):
 def main():
     server_config={
         'server.socket_host': '0.0.0.0',
-        'server.socket_port':4883,
+        'server.socket_port':9443,
 
         'server.ssl_module':'pyopenssl',
         'server.ssl_certificate':'./certs/server_cert.pem',

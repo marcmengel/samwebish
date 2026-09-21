@@ -4,6 +4,7 @@
 import threading
 
 #import samutil.parser
+
 from pyparsing import *
 
 from .parse_tree import *
@@ -63,7 +64,7 @@ listop = (in_ | Combine( not_ + in_, adjacent=False )).setName("list operator")
 equalop = Literal('=') | '!='
 singleop = (Literal('<=') | '>=' | '<' | '>' | Combine( Optional(not_) + like, adjacent=False )).setName("operator")
 
-name = Word( alphas,alphanums+"_.-+").setParseAction(downcaseTokens).setName("name") + ~FollowedBy(':').setName(':')
+name = Word( alphas,alphanums+"_.-+").setParseAction(common.downcaseTokens).setName("name") + ~FollowedBy(':').setName(':')
 
 # some of the complication here is that we want to parse number or date ranges, but allow unquoted
 # strings containing a dash. So even though numbers and dates also match the unquotedvalue parser, we need
