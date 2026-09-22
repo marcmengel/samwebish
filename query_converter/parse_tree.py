@@ -648,7 +648,7 @@ class DimNode(NegatableNode):
         name = re.sub("^tape_label$", "rucio.rses[0].tape_label", name)
         name = re.sub("^consumer$", "project.worker", name)
         name = re.sub("^consumer_process_id$", "project.worker", name)
-        name = re.sub("^consumer_status$", "project.status", name)
+        name = re.sub("^consumer_status$", "project.state", name)
         name = re.sub("^consumer_process_description$", "project.description", name)
         name = re.sub("^consumer_status$", "project.status", name)
         return name
@@ -682,6 +682,8 @@ class DimNode(NegatableNode):
         yield self.meta_trans(self.dim)
         yield op
         for v in val:
+            if self.dim == 'consumer_status' and v in ('consumed','completed'):
+                v = 'done'
             yield v
 
     def render(self):
