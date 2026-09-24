@@ -11,7 +11,11 @@ import traceback
 from version import samwebish_version
 from data_dispatcher.api import DataDispatcherClient
 from metacat.webapi import MetaCatClient
-from metacat.webapi.webapi import AlreadyExistsError, InvalidMetadataError, BadRequestError
+from metacat.webapi.webapi import (
+    AlreadyExistsError,
+    InvalidMetadataError,
+    BadRequestError,
+)
 from rucio.client import Client as RClient
 from rucio.client.replicaclient import ReplicaClient
 from query_converter.parse_tree import SAM_query_to_MetaCat
@@ -20,10 +24,13 @@ from metadata_converter import MetadataConverter
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # lifted from original samweb
 
+
 def _decodeJSONBody():
-    """ decode the request body, assuming it to be JSON
-    """
-    if cherrypy.request.body is None or cherrypy.request.headers['Content-Type'] != 'application/json':
+    """decode the request body, assuming it to be JSON"""
+    if (
+        cherrypy.request.body is None
+        or cherrypy.request.headers["Content-Type"] != "application/json"
+    ):
         raise SAMWebBadRequest("JSON data required")
     try:
         return convert_unicode_to_ascii(json.load(cherrypy.request.body))
@@ -32,8 +39,10 @@ def _decodeJSONBody():
     except UnicodeEncodeError:
         raise SAMWebBadRequest("JSON data contains non-ascii characters")
 
+
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for authentication, client connection caching
+
 
 class ClientCache:
 
@@ -57,50 +66,50 @@ class ClientCache:
         self.token_offset = len("Bearer ")
 
     def get_scitoken(self):
-        """ extract scitoken from Authorization: header """
+        """extract scitoken from Authorization: header"""
         print(f"headers: {cherrypy.request.headers}")
-        authheader = cherrypy.request.headers.get("Authorization","")
+        authheader = cherrypy.request.headers.get("Authorization", "")
         if not authheader:
-            raise cherrypy.HTTPError(401, 'SciToken athentication required')
-        return authheader[self.token_offset:]
+            raise cherrypy.HTTPError(401, "SciToken athentication required")
+        return authheader[self.token_offset :]
 
     def cheap_decode_token(self, scitok):
-        """ extract json data from jwt token without validating, etc. """
-        
+        """extract json data from jwt token without validating, etc."""
+
         tp = scitok.split(".")
-        return json.loads(base64.b64decode(tp[1]+'==', altchars='_-'))
+        return json.loads(base64.b64decode(tp[1] + "==", altchars="_-"))
 
     def get_username(self, scitok):
-        """ get username from scitoken """
+        """get username from scitoken"""
         # Scitoken purists will tell us *not* to do this, nor to map
         # tokens to users at all, but SAMweb and MetaCat do, via db tables
         # so we can either setup one of these tables, or cheat.
         # Currently we cheat:
         # our subjects are often not usernames, (except production accounts)
         # if our subject is username@fnal.gov, take that
-        # otherwise look for a username in the scope 
-        # i.e. "storage.write:.../users/username" 
+        # otherwise look for a username in the scope
+        # i.e. "storage.write:.../users/username"
         #
         # note that this username guess isn't actually used except to log
         # into backend services...
-        
+
         cherrypy.log(f"get_username: {scitok=}")
         decoded = self.cheap_decode_token(scitok)
         cherrypy.log(f'checking subject: {decoded["sub"]}')
         m = self.subj_user_re.match(decoded["sub"])
         if m:
-             cherrypy.log(f"Returning: {m.group(1)}")
-             return m.group(1)
+            cherrypy.log(f"Returning: {m.group(1)}")
+            return m.group(1)
         cherrypy.log(f'checking scope: {decoded["scope"]}')
         m = self.scope_user_re.search(decoded["scope"])
         if m:
-             cherrypy.log(f"Returning: {m.group(1)}")
-             return m.group(1)
+            cherrypy.log(f"Returning: {m.group(1)}")
+            return m.group(1)
         cherrypy.log(f"Returning: None!")
         return None
-       
+
     def getdd_client(self):
-        """ get DataDispatcherClient for this client """
+        """get DataDispatcherClient for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.ddccache or self.ddcexp[scitok] < time.time():
             username = self.get_username(scitok)
@@ -110,29 +119,29 @@ class ClientCache:
             try:
                 self.ddccache[scitok].login_token(username, scitok)
             except:
-                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+                raise cherrypy.HTTPError(401, "SciToken athentication failed")
             self.ddcexp[scitok] = time.time() + 300
         return self.ddccache[scitok]
 
     def getmc_client(self):
-        """ get MetaCatClient for this client """
+        """get MetaCatClient for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.mcccache or self.mccexp[scitok] < time.time():
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
             # track/clean up token_library files.
-            #self.mcccache[scitok] = MetaCatClient(token_file="/tmp/tok")
+            # self.mcccache[scitok] = MetaCatClient(token_file="/tmp/tok")
             self.mcccache[scitok] = MetaCatClient()
             try:
                 self.mcccache[scitok].login_token(username, scitok)
             except:
-                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+                raise cherrypy.HTTPError(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.mccexp[scitok] = time.time() + 300
         return self.mcccache[scitok]
 
     def getr_client(self):
-        """ get rucio Client for this client """
+        """get rucio Client for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.rccache or self.mccexp[scitok] < time.time():
             username = self.get_username(scitok)
@@ -141,21 +150,23 @@ class ClientCache:
             try:
                 # can't pass token into rucio client, so briefly set
                 # BEARER_TOKEN (?)
-                os.environ["BEARER_TOKEN"]=scitok
-                self.rccache[scitok] = RClient(auth_type="oidc", creds={"user":username})
+                os.environ["BEARER_TOKEN"] = scitok
+                self.rccache[scitok] = RClient(
+                    auth_type="oidc", creds={"user": username}
+                )
                 del os.environ["BEARER_TOKEN"]
                 cherrypy.log(f"getr_client: {self.rccache[scitok]=}")
             except:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
                 cherrypy.log(f"Exception: {traceback.format_exc()}")
-                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+                raise cherrypy.HTTPError(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.rcexp[scitok] = time.time() + 300
         return self.rccache[scitok]
 
     def getrrp_client(self):
-        """ get rucio Client for this client """
+        """get rucio Client for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.rrpccache or self.rrpcexp[scitok] < time.time():
             username = self.get_username(scitok)
@@ -164,15 +175,17 @@ class ClientCache:
             try:
                 # can't pass token into rucio client, so briefly set
                 # BEARER_TOKEN (?)
-                os.environ["BEARER_TOKEN"]=scitok
-                self.rrpccache[scitok] = ReplicaClient(auth_type="oidc", creds={"user":username})
+                os.environ["BEARER_TOKEN"] = scitok
+                self.rrpccache[scitok] = ReplicaClient(
+                    auth_type="oidc", creds={"user": username}
+                )
                 del os.environ["BEARER_TOKEN"]
                 cherrypy.log(f"getrrp_client: {self.rrpccache[scitok]=}")
             except:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
                 cherrypy.log(f"Exception: {traceback.format_exc()}")
-                raise cherrypy.HTTPError(401, 'SciToken athentication failed')
+                raise cherrypy.HTTPError(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.rrpcexp[scitok] = time.time() + 300
         return self.rrpccache[scitok]
@@ -189,26 +202,30 @@ class ClientCache:
                 del self.ddcexp[tok]
                 del self.ddccache[tok]
 
+
 client_cache = ClientCache()
 
-class ClientCacheMixin():
+
+class ClientCacheMixin:
 
     def __init__(self, *args, **kwargs):
         self.client_cache = client_cache
-        #self.namespace = "sam"
+        # self.namespace = "sam"
         # for testing:
         self.namespace = "mengel"
         self.default_dataset = "mengel:all"
-        self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT",""))
+        self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT", ""))
+
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for dispatching/handling web calls via CherryPy
 
+
 class Definitions(ClientCacheMixin):
-    """ dispatcher and methods for /api/definitions paths """
+    """dispatcher and methods for /api/definitions paths"""
 
     def _cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb definitions api """
+        """handle various REST-ish parsing of samweb definitions api"""
         cherrypy.log(f"Definitions: _cp_dispatch: {vpath=}")
         if len(vpath) == 1:
             # simple method like create
@@ -216,22 +233,22 @@ class Definitions(ClientCacheMixin):
         if len(vpath) == 2:
             # /name/defname --  method is the lower case of request type (GET, POST, DELETE)
             vpath.pop(0)  # /name/
-            cherrypy.request.params['defname'] = vpath.pop(0)
+            cherrypy.request.params["defname"] = vpath.pop(0)
             vpath.insert(0, cherrypy.request.method.lower())
             return self
         if len(vpath) == 3:
-            # /name/defname/snapshot 
+            # /name/defname/snapshot
             vpath.pop(0)  # /name/
-            cherrypy.request.params['defname'] = vpath.pop(0)
+            cherrypy.request.params["defname"] = vpath.pop(0)
             return self
         if len(vpath) == 4:
             cherrypy.log(f"Definitions: _cp_dispatch: length 4")
             # /name/defname/files/method
             vpath.pop(0)  # /name/
-            cherrypy.request.params['defname'] = vpath.pop(0)
-            a = vpath.pop(0) # /files/
+            cherrypy.request.params["defname"] = vpath.pop(0)
+            a = vpath.pop(0)  # /files/
             b = vpath.pop(0)
-            method =  f"{a}_{b}"
+            method = f"{a}_{b}"
             cherrypy.log(f"Definitions: {method=}")
             vpath.insert(0, method)
             return self
@@ -252,18 +269,17 @@ class Definitions(ClientCacheMixin):
         if before:
             query = f"{query} {sep} created_timestamp<'{before}'"
             sep = "and"
-            
+
         cherrypy.log(f"searching with {query=}")
         dlist = list(client.search_named_queries(query))
         cherrypy.log(f"got back {dlist=}")
-        return "\n".join([ x["name"] for x in dlist ])
-                    
+        return "\n".join([x["name"] for x in dlist])
 
     @cherrypy.expose
     def create(self, defname, dims, user):
         client = self.client_cache.getmc_client()
         mq = SAM_query_to_MetaCat(dims)
-        client.create_named_query( self.namespace, defname, mq )
+        client.create_named_query(self.namespace, defname, mq)
 
     @cherrypy.expose
     def delete(self, defname, dims, user, format="json"):
@@ -272,9 +288,9 @@ class Definitions(ClientCacheMixin):
     @cherrypy.expose
     def get(self, defname, format="json"):
         client = self.client_cache.getmc_client()
-        res =  client.get_named_query(self.namespace, defname)
+        res = client.get_named_query(self.namespace, defname)
         cherrypy.log(f"got {res=} for {defname=}")
-        if format=="plain":
+        if format == "plain":
             res = f"""
 Definition Name: {defname}
   Definition Id: {res['created_timestamp']}
@@ -289,19 +305,23 @@ Definition Name: {defname}
     def files_count(self, defname):
         sdict = self.summary(defname)
         cherrypy.log(f"got {sdict=} {sdict['count']}")
-        return str(sdict['count'])
+        return str(sdict["count"])
 
     def summary(self, defname):
         client = self.client_cache.getmc_client()
-        res = list(client.query(f"files selected by {self.namespace}:{defname}" , summary="count"))[0]
+        res = list(
+            client.query(
+                f"files selected by {self.namespace}:{defname}", summary="count"
+            )
+        )[0]
         return res
 
     @cherrypy.expose
     def files_summary(self, defname):
         sdict = self.summary(defname)
-        sdict['file_count'] = sdict['count']
-        sdict['total_file_size'] = sdict['total_size']
-        sdict['total_event_count'] = 0
+        sdict["file_count"] = sdict["count"]
+        sdict["total_file_size"] = sdict["total_size"]
+        sdict["total_event_count"] = 0
         cherrypy.log(f"{sdict=}")
         return json.dumps(sdict)
 
@@ -313,20 +333,21 @@ Definition Name: {defname}
         if format == "json":
             return json.dumps(res)
         else:
-            return "\n".join([e['name'] for e in res])
+            return "\n".join([e["name"] for e in res])
+
 
 class Files(ClientCacheMixin):
-    """ dispatcher and methods for /api/files paths """
+    """dispatcher and methods for /api/files paths"""
 
     @cherrypy.expose
     def index(self, **kwargs):
         cherrypy.log(f"Files:index() {cherrypy.request.method=}")
-        if  cherrypy.request.method == "POST":
+        if cherrypy.request.method == "POST":
             return self.post(**kwargs)
-        raise cherrypy.HTTPError(404, 'Location not found')
+        raise cherrypy.HTTPError(404, "Location not found")
 
     def _cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb files api """
+        """handle various REST-ish parsing of samweb files api"""
         cherrypy.log(f"Files:_cp_dispatch: {vpath=} {cherrypy.request.method=}")
         if len(vpath) == 0:
             cherrypy.log(f"Files: handling {cherrypy.request.method}")
@@ -336,20 +357,20 @@ class Files(ClientCacheMixin):
             # simple method like create
             return self
         if len(vpath) == 3:
-            # /name/fname/method --  method is the lower case of request type (GET, POST, DELETE) 
-            # /id/fname/method --  method is the lower case of request type (GET, POST, DELETE) 
+            # /name/fname/method --  method is the lower case of request type (GET, POST, DELETE)
+            # /id/fname/method --  method is the lower case of request type (GET, POST, DELETE)
             #       prepended to component and  method (get_name_metadata, put_id_metadata, etc.)
             comp = vpath.pop(0)  # /name/ or /id/
-            cherrypy.request.params['name'] = vpath.pop(0)
+            cherrypy.request.params["name"] = vpath.pop(0)
             vpath.insert(0, f"{cherrypy.request.method.lower()}_{comp}_{vpath.pop(0)}")
             return self
 
         if len(vpath) == 4:
             # /name/fname/lineage/type
             vpath.pop(0)  # /name/
-            cherrypy.request.params['name'] = vpath.pop(0)
+            cherrypy.request.params["name"] = vpath.pop(0)
             meth = vpath.pop(0)  # /lineage/
-            cherrypy.request.params['ltype'] = vpath.pop(0)
+            cherrypy.request.params["ltype"] = vpath.pop(0)
             vpath.insert(0, "lineage")
             return self
 
@@ -362,7 +383,7 @@ class Files(ClientCacheMixin):
         cherrypy.log(f"list: converted {dims=} to {mquery=}")
         client = self.client_cache.getmc_client()
         res = client.query(mquery)
-        return "\n".join([ x["name"] for x in res ])
+        return "\n".join([x["name"] for x in res])
 
     @cherrypy.expose
     def count(self, dims, **kwargs):
@@ -377,9 +398,9 @@ class Files(ClientCacheMixin):
     @cherrypy.expose
     def summary(self, dims, **kwargs):
         sdict = self._summary(dims)
-        sdict['file_count'] = sdict['count']
-        sdict['total_file_size'] = sdict['total_size']
-        sdict['total_event_count'] = 0
+        sdict["file_count"] = sdict["count"]
+        sdict["total_file_size"] = sdict["total_size"]
+        sdict["total_event_count"] = 0
         cherrypy.log(f"{sdict=}")
         return json.dumps(sdict)
 
@@ -387,22 +408,22 @@ class Files(ClientCacheMixin):
     def get_name_locations(self, name="", **kwargs):
         cherrypy.log(f"get_name_locations {name=}")
         rpclient = self.client_cache.getrrp_client()
-        data = list(rpclient.list_replicas( [{"scope":self.namespace, "name":name}] ))
+        data = list(rpclient.list_replicas([{"scope": self.namespace, "name": name}]))
         cherrypy.log(f"get_name_locations: {data=}")
         if not data:
-            return '[]'
-            #raise cherrypy.HTTPError(404, 'Location not found')
+            return "[]"
+            # raise cherrypy.HTTPError(404, 'Location not found')
         pfns = data[0]["pfns"]
         res = []
         for pfn, dat in pfns.items():
-            rse = dat['rse']
-            ploc = pfn.find("/",9)
-            res.append( {"location": f"{rse}:{pfn[ploc:]}"} )
+            rse = dat["rse"]
+            ploc = pfn.find("/", 9)
+            res.append({"location": f"{rse}:{pfn[ploc:]}"})
         if "format" in kwargs and kwargs["format"] == "plain":
             res = "\n".join(res)
         else:
             res = json.dumps(res)
-       
+
         cherrypy.log(f"get_name_locations: {res=}")
         return res
 
@@ -410,15 +431,23 @@ class Files(ClientCacheMixin):
     def put_name_locations(self, file, **kwargs):
         rpclient = self.client_cache.getrrp_client()
         mcclient = self.client_cache.getmc_client()
-  
+
         if "add" in kwargs:
             samloc = kwargs["add"]
-            rse, path = samloc.split(":",1)
-            metadata = mcclient.get_file(name=file, namespace=self.namespace, with_metadata = True)
-            rclient.add_replica( rse, self.namespace, file, metadata["size"], metadata["checksums"]["adler32"] )
+            rse, path = samloc.split(":", 1)
+            metadata = mcclient.get_file(
+                name=file, namespace=self.namespace, with_metadata=True
+            )
+            rclient.add_replica(
+                rse,
+                self.namespace,
+                file,
+                metadata["size"],
+                metadata["checksums"]["adler32"],
+            )
         if "remove" in kwargs:
             samloc = kwargs["remove"]
-            rse, path = samloc.split(":",1)
+            rse, path = samloc.split(":", 1)
             # not sure we should do this... I think for now this is a noop
             # also not an api call to remove just one replica on an rse...
         return "ok"
@@ -426,45 +455,50 @@ class Files(ClientCacheMixin):
     @cherrypy.expose
     def get_name_metadata(self, name=None, format="plain", **kwargs):
         mcclient = self.client_cache.getmc_client()
-        metadata = mcclient.get_file(name=name, namespace=self.namespace, with_metadata = True)
+        metadata = mcclient.get_file(
+            name=name, namespace=self.namespace, with_metadata=True
+        )
         converted_metadata = self.mcc.convert_all_mc_sam(metadata)
         if format == "json":
             return json.dumps(converted_metadata)
         else:
-            return "\n".join([f"{k:>20}:\t{v}" for k,v in converted_metadata.items()])
-              
+            return "\n".join([f"{k:>20}:\t{v}" for k, v in converted_metadata.items()])
 
-    def traverse_linage( self, mcclient, name, ltype, raw = False ):
-        data = mcclient.get_file(name=name, namespace=self.namespace,with_provenance=True)
+    def traverse_linage(self, mcclient, name, ltype, raw=False):
+        data = mcclient.get_file(
+            name=name, namespace=self.namespace, with_provenance=True
+        )
         res1 = data[ltype]
         res = []
         if raw:
             if len(res1) == 0:
-                res.append( f"{self.namespace}:{name}" )
+                res.append(f"{self.namespace}:{name}")
         else:
             res.extend(res1)
         for fid in res1:
             cname = res1.split(":")[1]
-            nextgen = self.traverse_lineage( mcclient, cname, ltype, raw)
+            nextgen = self.traverse_lineage(mcclient, cname, ltype, raw)
             if raw and len(nextgen == 0):
-                res.append( f"{self.namespace}:{cname}")
+                res.append(f"{self.namespace}:{cname}")
             else:
-                res.extend( nextgen )
+                res.extend(nextgen)
         return res
-       
+
     @cherrypy.expose
     def lineage(self, name, ltype, format="plain", **kwargs):
         # ltype is: parents, children, rawancestors
         mcclient = self.client_cache.getmc_client()
-        data = mcclient.get_file(name=file, namespace=self.namespace,with_provenance=True)
+        data = mcclient.get_file(
+            name=file, namespace=self.namespace, with_provenance=True
+        )
         if ltype in {"parents", "children"}:
             res = data[ltype]
         if ltype == "ancestors":
-            res = self.traverse_lineage( mcclient, name, "parents")
+            res = self.traverse_lineage(mcclient, name, "parents")
         if ltype == "descendants":
-            res = self.traverse_lineage( mcclient, name, "children")
+            res = self.traverse_lineage(mcclient, name, "children")
         if ltype == "rawancestors":
-            res = self.traverse_lineage( mcclient, name, "parents", raw = True )
+            res = self.traverse_lineage(mcclient, name, "parents", raw=True)
 
         if format == "json":
             return json.dumps(res)
@@ -473,18 +507,20 @@ class Files(ClientCacheMixin):
 
     @cherrypy.expose
     def post(self, **kwargs):
-        """ declare a file... """
+        """declare a file..."""
         metadata_text = cherrypy.request.body.read()
         metadata = json.loads(metadata_text)
         mcclient = self.client_cache.getmc_client()
         try:
-            mc_metadata = self.mcc.convert_all_sam_mc(metadata,namespace=self.namespace)
-            mcclient.declare_files(self.default_dataset, [ mc_metadata ], self.namespace)
+            mc_metadata = self.mcc.convert_all_sam_mc(
+                metadata, namespace=self.namespace
+            )
+            mcclient.declare_files(self.default_dataset, [mc_metadata], self.namespace)
         except AlreadyExistsError as e:
-            raise cherrypy.HTTPError(409, 'File already exists')
+            raise cherrypy.HTTPError(409, "File already exists")
         except InvalidMetadataError as e:
-            raise cherrypy.HTTPError(400, f'Invalid metadata: {e}')
-            
+            raise cherrypy.HTTPError(400, f"Invalid metadata: {e}")
+
         cherrypy.response.status = 204
         return ""
 
@@ -498,7 +534,7 @@ class Files(ClientCacheMixin):
             cherrypy.response.status = 204
             return ""
         except:
-            raise cherrypy.HTTPError(400, f'Invalid metadata: {e}')
+            raise cherrypy.HTTPError(400, f"Invalid metadata: {e}")
 
     @cherrypy.expose
     def put_name_metadata(self, name, *kwargs):
@@ -524,7 +560,7 @@ class Files(ClientCacheMixin):
         status = cherrypy.request.body
         mcclient = self.client_cache.getmc_client()
         metadata = _decodeJSONBody()
-        mcclient.update_file_metadata({"core.content_status":status}, fids=[file_id])
+        mcclient.update_file_metadata({"core.content_status": status}, fids=[file_id])
         cherrypy.response.status = 204
         return ""
 
@@ -534,25 +570,26 @@ class Files(ClientCacheMixin):
         metadata = _decodeJSONBody()
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         did = f"{self.default_dataset}:{name}"
-        mcclient.update_file_metadata({"core.content_status":status}, dids=[did])
+        mcclient.update_file_metadata({"core.content_status": status}, dids=[did])
         cherrypy.response.status = 204
         return ""
 
+
 class Users(ClientCacheMixin):
-    """ dispatcher and methods for /api/users paths """
+    """dispatcher and methods for /api/users paths"""
 
     def _cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb files api """
+        """handle various REST-ish parsing of samweb files api"""
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
         if len(vpath) == 2:
-            cherrypy.request.params['findby'] = vpath.pop(0)
-            cherrypy.request.params['nameorid'] = vpath.pop(0)
-            cherrypy.request.params['method'] = cherrypy.request.method.lower()
-            vpath.insert(0,f"{method}_by_{findby}")
+            cherrypy.request.params["findby"] = vpath.pop(0)
+            cherrypy.request.params["nameorid"] = vpath.pop(0)
+            cherrypy.request.params["method"] = cherrypy.request.method.lower()
+            vpath.insert(0, f"{method}_by_{findby}")
 
     @cherrypy.expose
-    def get(self, username=None, format='plain',  status=None):
+    def get(self, username=None, format="plain", status=None):
         raise NotImplementedError()
 
     @cherrypy.expose
@@ -562,7 +599,7 @@ class Users(ClientCacheMixin):
     @cherrypy.expose
     def get_by_name(self, nameorid):
         raise NotImplementedError()
-        
+
     @cherrypy.expose
     def get_by_id(self, nameorid):
         raise NotImplementedError()
@@ -575,13 +612,14 @@ class Users(ClientCacheMixin):
     def put_by_id(self, nameorid, jsondata):
         raise NotImplementedError()
 
+
 class Values(ClientCacheMixin):
-    """ dispatcher and methods for /api/values paths """
+    """dispatcher and methods for /api/values paths"""
 
     def _cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb files api """
+        """handle various REST-ish parsing of samweb files api"""
         if len(vpath) == 1:
-            cherrypy.request.params['value_type'] = vpath.pop(0)
+            cherrypy.request.params["value_type"] = vpath.pop(0)
             vpath.insert(0, f"{cherrypy.request.method.lower()}_{vpath.pop(0)}")
 
     @cherrypy.expose
@@ -592,7 +630,7 @@ class Values(ClientCacheMixin):
 
     @cherrypy.expose
     def post_parameters(self, **kwargs):
-        # don't need to pre-post parameters in MetaCat, so 
+        # don't need to pre-post parameters in MetaCat, so
         cherrypy.response.status = 204
         return ""
 
@@ -604,7 +642,7 @@ class Values(ClientCacheMixin):
         nlist = mcclient.report_metadata_values("app.name")
         # well, we don't actually easily get the correlations, so...
         # just permute the families, names and verions.
-        res=[]
+        res = []
         for f in flist:
             for n in nlist:
                 for v in vlist:
@@ -613,13 +651,14 @@ class Values(ClientCacheMixin):
 
     @cherrypy.expose
     def post_applications(self, **kwargs):
-        # don't need to pre-post applications in MetaCat, so 
+        # don't need to pre-post applications in MetaCat, so
         # just say its "ok"...
         cherrypy.response.status = 204
         return ""
 
+
 class Projects(ClientCacheMixin):
-    """ dispatcher and methods for /api/project paths """
+    """dispatcher and methods for /api/project paths"""
 
     def __init__(self):
         ClientCacheMixin.__init__(self)
@@ -627,49 +666,48 @@ class Projects(ClientCacheMixin):
         self.project_finished = {}
 
     def _cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb projects api """
+        """handle various REST-ish parsing of samweb projects api"""
 
         cherrypy.log(f"Projects:_cp_dispatch {vpath=}")
         if len(vpath) == 0:
             vpath.insert(0, cherrypy.request.method.lower())
-            
+
         if len(vpath) == 2:
             # stationname/projectname
-            cherrypy.request.params['station'] = vpath.pop(0)
-            cherrypy.request.params['project'] = vpath.pop(0)
+            cherrypy.request.params["station"] = vpath.pop(0)
+            cherrypy.request.params["project"] = vpath.pop(0)
             vpath.insert(0, cherrypy.request.method.lower())
             return self
         if len(vpath) == 3:
             # id/project_id/method
-            assert(vpath[0] == 'id')
+            assert vpath[0] == "id"
             vpath.pop(0)
-            cherrypy.request.params['project_id'] = vpath.pop(0)
+            cherrypy.request.params["project_id"] = vpath.pop(0)
             return self
         if len(vpath) == 5:
             # id/project_id/processes/<process_id>/method
-            assert(vpath[0] == 'id')
+            assert vpath[0] == "id"
             vpath.pop(0)
-            cherrypy.request.params['project_id'] = vpath.pop(0)
+            cherrypy.request.params["project_id"] = vpath.pop(0)
             vpath.pop(0)
-            cherrypy.request.params['process_id'] = vpath.pop(0)
+            cherrypy.request.params["process_id"] = vpath.pop(0)
             cherrypy.log(f"len 5: {vpath=}")
             return self
 
-
     @cherrypy.expose
-    def establishProcess(self,   project_id=None, **kwargs):
+    def establishProcess(self, project_id=None, **kwargs):
         ddclient = self.client_cache.getdd_client()
         cherrypy.log("establishProcess...")
         return ddclient.new_worker_id()
-        
+
     @cherrypy.expose
-    def getNextFile(self,   project_id=None, process_id=None,  **kwargs):
+    def getNextFile(self, project_id=None, process_id=None, **kwargs):
         ddclient = self.client_cache.getdd_client()
         res = ddclient.next_file(project_id=project_id, worker_id=process_id)
-        # just return the url from the first replica 
+        # just return the url from the first replica
         cherrypy.log(f"next_file gives: {res=}")
         if res:
-            rname, rdict = list(res['replicas'].items())[0]
+            rname, rdict = list(res["replicas"].items())[0]
             name = res["name"]
             namespace = res["namespace"]
             self.last_process_file[process_id] = name
@@ -679,24 +717,31 @@ class Projects(ClientCacheMixin):
             cherrypy.response.status = 204
             return ""
 
-     
     @cherrypy.expose
-    def updateFileStatus(self, process_id, status='consumed', filename=None,  project_id=None, **kwargs):
-        cherrypy.log(f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}")
+    def updateFileStatus(
+        self, process_id, status="consumed", filename=None, project_id=None, **kwargs
+    ):
+        cherrypy.log(
+            f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}"
+        )
         if cherrypy.request.method == "POST":
             data = cherrypy.request.body.read()
             cherrypy.log(f"updateFileStatus: {data=}")
-        if status == 'consumed':
-            return self.releaseFile(process_id, 'ok', project_id=project_id, filename=filename)
-        if status == 'skipped':
-            return self.releaseFile(process_id, 'bad', project_id=project_id, filename=filename)
+        if status == "consumed":
+            return self.releaseFile(
+                process_id, "ok", project_id=project_id, filename=filename
+            )
+        if status == "skipped":
+            return self.releaseFile(
+                process_id, "bad", project_id=project_id, filename=filename
+            )
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def releaseFile(self, process_id, status,   project_id=None, filename=None,  **kwargs):
+    def releaseFile(self, process_id, status, project_id=None, filename=None, **kwargs):
         cherrypy.log(f"releaseFile: {process_id=} {status=} {filename=} {project_id=}")
-        if not filename and self.last_process_file.get(process_id,""):
+        if not filename and self.last_process_file.get(process_id, ""):
             filename = self.last_process_file[process_id]
             del self.last_process_file[process_id]
         if not filename:
@@ -705,7 +750,7 @@ class Projects(ClientCacheMixin):
         ddclient = self.client_cache.getdd_client()
         filename = os.path.basename(filename)
         did = f"{self.namespace}:{filename}"
-        if status == 'ok':
+        if status == "ok":
             ddclient.file_done(project_id, did, process_id)
         else:
             ddclient.file_failed(project_id, did, process_id)
@@ -713,29 +758,28 @@ class Projects(ClientCacheMixin):
         return ""
 
     @cherrypy.expose
-    def endProcess(self, process_id, status,   project_id=None, **kwargs):
+    def endProcess(self, process_id, status, project_id=None, **kwargs):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
     @cherrypy.expose
-    def endProject(self,  project_id=None, **kwargs):
-        """ if we haven't seen a getNextFile return nothing, cancel it """
+    def endProject(self, project_id=None, **kwargs):
+        """if we haven't seen a getNextFile return nothing, cancel it"""
         if project_id not in self.project_finished:
             ddclient = self.client_cache.getdd_client()
             ddclient.cancel_project(project_id)
         cherrypy.response.status = 204
         return ""
-        
 
     # same function for project or process status, which is a put
     # we ignore..
     @cherrypy.expose
-    def status(self, process_id=None,  project_id=None, **kwargs):
+    def status(self, process_id=None, project_id=None, **kwargs):
         pass
 
     @cherrypy.expose
-    def get(self,  project_id=None, **kwargs):
+    def get(self, project_id=None, **kwargs):
         ddclient = self.client_cache.getdd_client()
         return json.dumps(ddclient.get_project(project_id))
 
@@ -745,19 +789,20 @@ class Projects(ClientCacheMixin):
         return json.dumps(ddclient.get_project(project_id))
 
     @cherrypy.expose
-    def summary(self,  project_id=None, **kwargs):
+    def summary(self, project_id=None, **kwargs):
         ddclient = self.client_cache.getmc_client()
         proj = json.dumps(ddclient.get_project(project_id))
         #  xxx mimic sam Project summary?
         return json.dumps(ddclient.get_project(project_id))
 
     @cherrypy.expose
-    def recovery_dimensions(self,  project_id=None, **kwargs):
+    def recovery_dimensions(self, project_id=None, **kwargs):
         proj = json.dumps(ddclient.get_project(project_id))
         return "project {d['attributes']['name']} minus project_status like 'com%'"
 
+
 class Api(ClientCacheMixin):
-    """ dispatcher and methods for /api/ paths """
+    """dispatcher and methods for /api/ paths"""
 
     def __init__(self):
         ClientCacheMixin.__init__(self)
@@ -770,22 +815,24 @@ class Api(ClientCacheMixin):
         }
 
     def _cp_dispatch(self, vpath):
-        """ handle various REST-ish parsing of samweb api """
+        """handle various REST-ish parsing of samweb api"""
         cherrypy.log(f"Api:_cp_dispatch: {vpath=} {cherrypy.request.method=}")
         if len(vpath) == 0:
-            vpath.insert(0, 'index')
+            vpath.insert(0, "index")
             return self
         if vpath[0] in self.parts:
             dest = vpath.pop(0)
-            cherrypy.log(f"Api:_cp_dispatch: handing off to {dest} -> {self.parts[dest]}..")
+            cherrypy.log(
+                f"Api:_cp_dispatch: handing off to {dest} -> {self.parts[dest]}.."
+            )
 
             return self.parts[dest]
         if len(vpath) == 3:
             vpath.pop(0)
-            cherrypy.request.params['projectname'] = vpath.pop(0)
+            cherrypy.request.params["projectname"] = vpath.pop(0)
             return self
-        return self 
-    
+        return self
+
     @cherrypy.expose
     def index(self, **kwargs):
         cherrypy.log("test message")
@@ -798,11 +845,11 @@ class Api(ClientCacheMixin):
     @cherrypy.expose
     def deleteDefinition(self, **kwargs):
         return Definitions.delete(self, **kwargs)
-        
+
     @cherrypy.expose
     def describeDefinition(self, **kwargs):
         return Definitions.get(self, **kwargs)
-        
+
     @cherrypy.expose
     def translateConstraints(self, **kwargs):
         return Files.list(**kwargs)
@@ -814,21 +861,37 @@ class Api(ClientCacheMixin):
     @cherrypy.expose
     def getMetadata(self, **kwargs):
         return Files.get_name_metadata(self, **kwargs)
-        
+
     @cherrypy.expose
     def setStatus(self, **kwargs):
         pass
+
     @cherrypy.expose
     def dumpStation(self, **kwargs):
         ddclient = self.client_cache.getdd_client()
         rlst = list(ddclient.list_projects())
         cherrypy.log(f"dumpStation: got {rlst=}")
         res = f"samwebish version {samwebish_version}\n{len(rlst)} active projects:\n"
-        res += "\n".join([f"project {x['attributes'].get('name','')} id {x['project_id']} owner: {x['owner']} state: {x['state']} files: {len(x['file_handles'])} " for x in rlst])
+        res += "\n".join(
+            [
+                f"project {x['attributes'].get('name','')} id {x['project_id']} owner: {x['owner']} state: {x['state']} files: {len(x['file_handles'])} "
+                for x in rlst
+            ]
+        )
         return res
 
     @cherrypy.expose
-    def startProject(self, name, station, username, defname=None, def_id=None, snapshot_id=None, group=None, **kwargs):
+    def startProject(
+        self,
+        name,
+        station,
+        username,
+        defname=None,
+        def_id=None,
+        snapshot_id=None,
+        group=None,
+        **kwargs,
+    ):
         ddclient = self.client_cache.getdd_client()
         mcclient = self.client_cache.getmc_client()
         if defname:
@@ -838,40 +901,40 @@ class Api(ClientCacheMixin):
         if snapshot_id:
             q = f"files from {self.namespace}:snapshot_{snapshot_id}"
         try:
-            files = list(mcclient.query( q ))
+            files = list(mcclient.query(q))
         except BadRequestError:
-            raise cherrypy.HTTPError(404, f'Defname {defname} not found')
+            raise cherrypy.HTTPError(404, f"Defname {defname} not found")
         sid = f"{self.namespace}:snapshot_for_project_{name}"
         cherrypy.log(f"startProject: {q=} {sid=} {files=}")
-        ds = mcclient.create_dataset( sid )
-        mcclient.add_files( sid, files )
-        p = ddclient.create_project(files, project_attributes={'name': name}, query=q )
+        ds = mcclient.create_dataset(sid)
+        mcclient.add_files(sid, files)
+        p = ddclient.create_project(files, project_attributes={"name": name}, query=q)
         b = cherrypy.request.base
         return f"{b}/api/projects/id/{p['project_id']}"
-        
+
     @cherrypy.expose
     def findProject(self, name, **kwargs):
         ddclient = self.client_cache.getdd_client()
-        pl = list(ddclient.list_projects(attributes={'name':name}))
+        pl = list(ddclient.list_projects(attributes={"name": name}))
         p = pl[0]
         b = cherrypy.request.base
         return f"{b}/api/projects/id/{p['project_id']}"
 
-def main():
-    server_config={
-        'server.socket_host': '0.0.0.0',
-        'server.socket_port':9443,
 
-        'server.ssl_module':'pyopenssl',
-        'server.ssl_certificate':'./certs/server_cert.pem',
-        'server.ssl_private_key':'./certs/server_key.pem',
-        
+def main():
+    server_config = {
+        "server.socket_host": "0.0.0.0",
+        "server.socket_port": 9443,
+        "server.ssl_module": "pyopenssl",
+        "server.ssl_certificate": "./certs/server_cert.pem",
+        "server.ssl_private_key": "./certs/server_key.pem",
     }
     cherrypy.config.update(server_config)
-    cherrypy.tree.mount(Api(), '/api', {'/': {'tools.trailing_slash.missing': False}})
+    cherrypy.tree.mount(Api(), "/api", {"/": {"tools.trailing_slash.missing": False}})
 
     cherrypy.engine.start()
     cherrypy.engine.block()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
