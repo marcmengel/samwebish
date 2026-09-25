@@ -434,7 +434,7 @@ class Files(ClientCacheMixin):
             metadata = mcclient.get_file(
                 name=file, namespace=self.namespace, with_metadata=True
             )
-            rclient.add_replica(
+            rpclient.add_replica(
                 rse,
                 self.namespace,
                 file,
