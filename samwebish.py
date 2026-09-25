@@ -27,17 +27,13 @@ from metadata_converter import MetadataConverter
 
 def _decodeJSONBody():
     """decode the request body, assuming it to be JSON"""
-    if (
-        cherrypy.request.body is None
-        or cherrypy.request.headers["Content-Type"] != "application/json"
-    ):
-        raise SAMWebBadRequest("JSON data required")
+    content_type = cherrypy.request.headers.get("Content-Type", "").split(";")[0].strip()
+    if cherrypy.request.body is None or content_type != "application/json":
+        raise cherrypy.HTTPError(400, "JSON data required")
     try:
-        return convert_unicode_to_ascii(json.load(cherrypy.request.body))
+        return json.load(cherrypy.request.body)
     except ValueError as ex:
-        raise SAMWebBadRequest("Invalid JSON data: %s" % ex)
-    except UnicodeEncodeError:
-        raise SAMWebBadRequest("JSON data contains non-ascii characters")
+        raise cherrypy.HTTPError(400, "Invalid JSON data: %s" % ex)
 
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -438,7 +434,7 @@ class Files(ClientCacheMixin):
             metadata = mcclient.get_file(
                 name=file, namespace=self.namespace, with_metadata=True
             )
-            rclient.add_replica(
+            rpclient.add_replica(
                 rse,
                 self.namespace,
                 file,
