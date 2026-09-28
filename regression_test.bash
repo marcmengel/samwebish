@@ -46,8 +46,8 @@ failed() {
        echo "Failed: $*"
    else
        printf "F"
-       fail_list="${fail_list}\nFailed $*"
    fi
+   fail_list="${fail_list}\nFailed $*"
 }
 
 run_expecting()  {
@@ -95,6 +95,12 @@ run_expecting()  {
    return $ec
 }
 
+finish_up() {
+    printf "$fail_list"
+    echo
+    return [ "" = "$fail_list" ]
+}
+
 make_new_file_metadata() {
     ds=$(date "+%Y%m%d%H%M%S")
     sed -e "s/@DATESTAMP@/$ds/" \
@@ -125,6 +131,4 @@ run_expecting -f "samweb declare-file testdata/md_file_exists.json" "already exi
 run_expecting -f "samweb declare-file testdata/md_bad_checksum.json"  "checksum md5: value is wrong length" 
 run_expecting "samweb run-project --user=mengel --defname=gen_cfg 'echo doing %fileurl...'" "Started project" "Started consumer processs ID" "doing" "a.fcl" "d.fcl" "Stopped project"
 
-printf "$fail_list"
-echo
-
+finish_up
