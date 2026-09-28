@@ -6,6 +6,7 @@ import os
 import os.path
 import re
 import time
+import threading
 import traceback
 
 from version import samwebish_version
@@ -64,6 +65,7 @@ class ClientCache:
         self.subj_user_re = re.compile("(.*)@fnal.gov")
         self.scope_user_re = re.compile("storage[^ ]*/users/([^ ]*)")
         self.token_offset = len("Bearer ")
+        self.rucio_env_lock = threading.Lock()
 
     def get_scitoken(self):
         """extract scitoken from Authorization: header"""
@@ -149,12 +151,15 @@ class ClientCache:
             # track/clean up token_library files.
             try:
                 # can't pass token into rucio client, so briefly set
-                # BEARER_TOKEN (?)
-                os.environ["BEARER_TOKEN"] = scitok
-                self.rccache[scitok] = RClient(
-                    auth_type="oidc", creds={"user": username}
-                )
-                del os.environ["BEARER_TOKEN"]
+                # BEARER_TOKEN, thread lock it so we don't get misplaced
+                # authentication if we have multiple threads running...
+                with self.rucio_env_lock:
+                    os.environ["BEARER_TOKEN"] = scitok
+                    self.rccache[scitok] = RClient(
+                        auth_type="oidc", creds={"user": username}
+                    )
+                    self.rccache[scitok].whoami()
+                    del os.environ["BEARER_TOKEN"]
                 cherrypy.log(f"getr_client: {self.rccache[scitok]=}")
             except:
                 if "BEARER_TOKEN" in os.environ:

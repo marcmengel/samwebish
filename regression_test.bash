@@ -98,7 +98,7 @@ run_expecting()  {
 finish_up() {
     printf "$fail_list"
     echo
-    return [ "" = "$fail_list" ]
+    [ "" = "$fail_list" ]
 }
 
 make_new_file_metadata() {
