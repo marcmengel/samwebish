@@ -4,3 +4,6 @@ testdata/md_new_file.json
 *.pem
 *.pyc
 *.tgz
+*.egg-info/
+build/
+dist/
