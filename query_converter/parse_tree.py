@@ -1059,6 +1059,11 @@ class MetaCatTransformer(ParseTreeTransformer):
             logging.debug(f"{self.snapshot_terms=}")
             if self.proj_terms:
                 self.modified = True
+                if not self.proj_id_term:
+                    # if consumer_id mentioned but no project_name, make
+                    # it the project lookup term
+                    if self.proj_terms[0].dim == 'consumer_id':
+                        self.proj_id_term = self.proj_terms[0]
                 if len(self.proj_terms) > 1:
                     pt = AndNode(*self.proj_terms)
                 elif len(self.proj_terms) == 1:
